@@ -14,6 +14,8 @@
 (def *current*)
 (def *state*) ; :element :chars :between
 (def *sb*)
+(def #^{:doc "When set to true, clojure.xml/parse preserves significant whitespace."} 
+ *preserve-whitespace* false)
 
 (defstruct element :tag :attrs :content)
 
@@ -25,8 +27,9 @@
   (let [push-content (fn [e c]
                        (assoc e :content (conj (or (:content e) []) c)))
         push-chars (fn []
-                     (when (and (= *state* :chars)
-                                (some (complement #(. Character (isWhitespace %))) (str *sb*)))
+                     (when (and (= *state* :chars) 
+                                (or *preserve-whitespace* 
+                                  (some (complement #(. Character (isWhitespace %))) (str *sb*))))
                        (set! *current* (push-content *current* (str *sb*)))))]
     (new clojure.lang.XMLHandler
          (proxy [ContentHandler] []
