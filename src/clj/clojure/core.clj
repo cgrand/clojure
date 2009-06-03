@@ -546,45 +546,43 @@
     (reduce conj () coll))
 
 ;;math stuff
-(defn +
+(defmacro
+ #^{:private true} def-left-op
+ ([op docstring unary binary] `(def-left-op ~op ~docstring false nil ~unary ~binary)) 
+ ([op docstring zero unary binary] `(def-left-op ~op ~docstring true ~zero ~unary ~binary)) 
+ ([op docstring has-zero? zero unary binary] 
+  (let [inlines (list
+                  `([x#] (concat '~unary [x#]))  
+                  `([x# y#] (concat '~binary [x# y#]))
+                  `([x# y# & more#] (reduce (fn [& xy#] (concat '~binary xy#)) (list* x# y# more#))))
+        inlines (if has-zero? (cons `([] ~zero) inlines) inlines)
+        arities (list  
+                  `([x#] (~@unary x#))
+                  `([x# y#] (~@binary x# y#))
+                  `([x# y# & more#] (reduce ~op (~op x# y#) more#)))
+        arities (if has-zero? (cons `([] ~zero) arities) arities)]
+   `(defn ~op
+      ~docstring
+      {:inline (fn ~@inlines)}
+      ~@arities))))
+
+(def-left-op +
   "Returns the sum of nums. (+) returns 0."
-  {:inline (fn [x y] `(. clojure.lang.Numbers (add ~x ~y)))
-   :inline-arities #{2}}
-  ([] 0)
-  ([x] (cast Number x))
-  ([x y] (. clojure.lang.Numbers (add x y)))
-  ([x y & more]
-   (reduce + (+ x y) more)))
+  0 (cast Number) (clojure.lang.Numbers/add))
 
-(defn *
+(def-left-op *
   "Returns the product of nums. (*) returns 1."
-  {:inline (fn [x y] `(. clojure.lang.Numbers (multiply ~x ~y)))
-   :inline-arities #{2}}
-  ([] 1)
-  ([x] (cast Number x))
-  ([x y] (. clojure.lang.Numbers (multiply x y)))
-  ([x y & more]
-   (reduce * (* x y) more)))
+  1 (cast Number) (clojure.lang.Numbers/multiply))
 
-(defn /
+(def-left-op /
   "If no denominators are supplied, returns 1/numerator,
   else returns numerator divided by all of the denominators."
-  {:inline (fn [x y] `(. clojure.lang.Numbers (divide ~x ~y)))
-   :inline-arities #{2}}
-  ([x] (/ 1 x))
-  ([x y] (. clojure.lang.Numbers (divide x y)))
-  ([x y & more]
-   (reduce / (/ x y) more)))
+  (/ 1) (clojure.lang.Numbers/divide))
 
-(defn -
+(def-left-op -
   "If no ys are supplied, returns the negation of x, else subtracts
   the ys from x and returns the result."
-  {:inline (fn [& args] `(. clojure.lang.Numbers (minus ~@args)))
-   :inline-arities #{1 2}}
-  ([x] (. clojure.lang.Numbers (minus x)))
-  ([x y] (. clojure.lang.Numbers (minus x y)))
-  ([x y & more]
-   (reduce - (- x y) more)))
+  (clojure.lang.Numbers/minus) (clojure.lang.Numbers/minus))
 
 (defn <
   "Returns non-nil if nums are in monotonically increasing order,
