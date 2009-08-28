@@ -434,6 +434,11 @@ void doEnsure(Ref ref){
 		return;
 	ref.lock.readLock().lock();
 
+	if(ref.tvals != null && ref.tvals.point > readPoint) {
+		ref.lock.readLock().unlock();
+		throw retryex;
+	}
+
 	Info refinfo = ref.tinfo;
 
 	//writer exists
