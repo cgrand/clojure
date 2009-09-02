@@ -434,10 +434,11 @@ void doEnsure(Ref ref){
 		return;
 	ref.lock.readLock().lock();
 
+	//someone completed a write after our snapshot
 	if(ref.tvals != null && ref.tvals.point > readPoint) {
-		ref.lock.readLock().unlock();
-		throw retryex;
-	}
+        ref.lock.readLock().unlock();
+        throw retryex;
+    }
 
 	Info refinfo = ref.tinfo;
 
