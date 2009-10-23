@@ -357,12 +357,14 @@
 
 (defn symbol
   "Returns a Symbol with the given namespace and name."
+  {:tag clojure.lang.Symbol}
   ([name] (if (symbol? name) name (clojure.lang.Symbol/intern name)))
   ([ns name] (clojure.lang.Symbol/intern ns name)))
 
 (defn keyword
   "Returns a Keyword with the given namespace and name.  Do not use :
   in the keyword strings, it will be added automatically."
+  {:tag clojure.lang.Keyword}
   ([name] (if (keyword? name) name (clojure.lang.Keyword/intern name)))
   ([ns name] (clojure.lang.Keyword/intern ns name)))
 
@@ -540,10 +542,11 @@
 
 
 (defn compare
-  "Comparator. Returns 0 if x equals y, -1 if x is logically 'less
-  than' y, else 1. Same as Java x.compareTo(y) except it also works
-  for nil, and compares numbers and collections in a type-independent
-  manner. x must implement Comparable"
+  "Comparator. Returns a negative number, zero, or a positive number
+  when x is logically 'less than', 'equal to', or 'greater than'
+  y. Same as Java x.compareTo(y) except it also works for nil, and
+  compares numbers and collections in a type-independent manner. x
+  must implement Comparable"
   {:tag Integer
    :inline (fn [x y] `(. clojure.lang.Util compare ~x ~y))}
   [x y] (. clojure.lang.Util (compare x y)))
@@ -1191,28 +1194,58 @@
          (let [~form temp#]
            ~@body)))))
 
+(defn push-thread-bindings
+  "WARNING: This is a low-level function. Prefer high-level macros like
+  binding where ever possible.
+
+  Takes a map of Var/value pairs. Binds each Var to the associated value for
+  the current thread. Each call *MUST* be accompanied by a matching call to
+  pop-thread-bindings wrapped in a try-finally!
+  
+      (push-thread-bindings bindings)
+      (try
+        ...
+        (finally
+          (pop-thread-bindings)))"
+  [bindings]
+  (clojure.lang.Var/pushThreadBindings bindings))
+
+(defn pop-thread-bindings
+  "Pop one set of bindings pushed with push-binding before. It is an error to
+  pop bindings without pushing before."
+  []
+  (clojure.lang.Var/popThreadBindings))
+
+(defn get-thread-bindings
+  "Get a map with the Var/value pairs which is currently in effect for the
+  current thread."
+  []
+  (clojure.lang.Var/getThreadBindings))
+
 (defmacro binding
   "binding => var-symbol init-expr
 
   Creates new bindings for the (already-existing) vars, with the
   supplied initial values, executes the exprs in an implicit do, then
-  re-establishes the bindings that existed before."
+  re-establishes the bindings that existed before.  The new bindings
+  are made in parallel (unlike let); all init-exprs are evaluated
+  before the vars are bound to their new values."
   [bindings & body]
-    (assert-args binding
-      (vector? bindings) "a vector for its binding"
-      (even? (count bindings)) "an even number of forms in binding vector")
-    (let [var-ize (fn [var-vals]
-                    (loop [ret [] vvs (seq var-vals)]
-                      (if vvs
-                        (recur  (conj (conj ret `(var ~(first vvs))) (second vvs))
-                                (next (next vvs)))
-                        (seq ret))))]
-      `(let []
-         (. clojure.lang.Var (pushThreadBindings (hash-map ~@(var-ize bindings))))
-         (try
-          ~@body
-          (finally
-           (. clojure.lang.Var (popThreadBindings)))))))
+  (assert-args binding
+    (vector? bindings) "a vector for its binding"
+    (even? (count bindings)) "an even number of forms in binding vector")
+  (let [var-ize (fn [var-vals]
+                  (loop [ret [] vvs (seq var-vals)]
+                    (if vvs
+                      (recur  (conj (conj ret `(var ~(first vvs))) (second vvs))
+                             (next (next vvs)))
+                      (seq ret))))]
+    `(let []
+       (push-thread-bindings (hash-map ~@(var-ize bindings)))
+       (try
+         ~@body
+         (finally
+           (pop-thread-bindings))))))
 
 (defn find-var
   "Returns the global var named by the namespace-qualified symbol, or
@@ -1768,6 +1801,15 @@
   "Return a lazy sequence of all but the last n (default 1) items in coll"
   ([s] (drop-last 1 s))
   ([n s] (map (fn [x _] x) s (drop n s))))
+
+(defn take-last
+  "Returns a seq of the last n items in coll.  Depending on the type
+  of coll may be no better than linear time.  For vectors, see also subvec."
+  [n coll]
+  (loop [s (seq coll), lead (seq (drop n coll))]
+    (if lead
+      (recur (next s) (next lead))
+      s)))
 
 (defn drop-while
   "Returns a lazy sequence of the items in coll starting from the first
@@ -2946,7 +2988,7 @@
                                 (conj (pop groups) (conj (peek groups) [k v]))
                                 (conj groups [k v])))
                             [] (partition 2 seq-exprs)))
-        err (fn [& msg] (throw (IllegalArgumentException. (apply str msg))))
+        err (fn [& msg] (throw (IllegalArgumentException. #^String (apply str msg))))
         emit-bind (fn emit-bind [[[bind expr & mod-pairs]
                                   & [[_ next-expr] :as next-groups]]]
                     (let [giter (gensym "iter__")
@@ -3738,7 +3780,7 @@
 (defmacro with-loading-context [& body]
   `((fn loading# [] 
         (. clojure.lang.Var (pushThreadBindings {clojure.lang.Compiler/LOADER  
-                                                 (-> loading# .getClass .getClassLoader)}))
+                                                 (.getClassLoader (.getClass #^Object loading#))}))
         (try
          ~@body
          (finally
@@ -4413,9 +4455,9 @@
                                            "clojure/version.properties")
       properties     (doto (new java.util.Properties) (.load version-stream))
       prop (fn [k] (.getProperty properties (str "clojure.version." k)))
-      clojure-version {:major       (Integer/valueOf (prop "major"))
-                       :minor       (Integer/valueOf (prop "minor"))
-                       :incremental (Integer/valueOf (prop "incremental"))
+      clojure-version {:major       (Integer/valueOf #^String (prop "major"))
+                       :minor       (Integer/valueOf #^String (prop "minor"))
+                       :incremental (Integer/valueOf #^String (prop "incremental"))
                        :qualifier   (prop "qualifier")}]
   (def *clojure-version* 
     (if (not (= (prop "interim") "false"))
