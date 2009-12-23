@@ -6,7 +6,9 @@
 ;   the terms of this license.
 ;   You must not remove this notice, or any other, from this software.
 
-(ns clojure.core)
+(ns #^{:doc "The core Clojure language."
+       :author "Rich Hickey"}
+  clojure.core)
 
 (def unquote)
 (def unquote-splicing)
@@ -112,6 +114,11 @@
  #^{:arglists '([x])
     :doc "Return true if x implements ISeq"}
  seq? (fn seq? [x] (instance? clojure.lang.ISeq x)))
+
+(def
+ #^{:arglists '([x])
+    :doc "Return true if x is a Character"}
+ char? (fn char? [x] (instance? Character x)))
 
 (def
  #^{:arglists '([x])
@@ -225,7 +232,16 @@
               fdecl (if (map? (last fdecl))
                       (butlast fdecl)
                       fdecl)
-              m (conj {:arglists (list 'quote (sigs fdecl))} m)]
+              m (conj {:arglists (list 'quote (sigs fdecl))} m)
+              m (let [inline (:inline m)
+                      ifn (first inline)
+                      iname (second inline)]
+                  ;; same as: (if (and (= 'fn ifn) (not (symbol? iname))) ...)
+                  (if (if (clojure.lang.Util/equiv 'fn ifn)
+                        (if (instance? clojure.lang.Symbol iname) false true))
+                    ;; inserts the same fn name to the inline fn if it does not have one
+                    (assoc m :inline (cons ifn (cons name (next inline))))
+                    m))]
           (list 'def (with-meta name (conj (if (meta name) (meta name) {}) m))
                 (cons `fn fdecl)))))
 
@@ -514,7 +530,8 @@
   [x] (. clojure.lang.Delay (force x)))
 
 (defmacro if-not
-  "Evaluates test. If logical false, evaluates and returns then expr, otherwise else expr, if supplied, else nil."
+  "Evaluates test. If logical false, evaluates and returns then expr, 
+  otherwise else expr, if supplied, else nil."
   ([test then] `(if-not ~test ~then nil))
   ([test then else]
    `(if (not ~test) ~then ~else)))
@@ -1135,15 +1152,16 @@
 (defmacro defmethod
   "Creates and installs a new method of multimethod associated with dispatch-value. "
   [multifn dispatch-val & fn-tail]
-  `(. ~multifn addMethod ~dispatch-val (fn ~@fn-tail)))
+  `(. ~(with-meta multifn {:tag 'clojure.lang.MultiFn}) addMethod ~dispatch-val (fn ~@fn-tail)))
 
 (defn remove-method
-  "Removes the method of multimethod associated	with dispatch-value."
+  "Removes the method of multimethod associated with dispatch-value."
  [#^clojure.lang.MultiFn multifn dispatch-val]
  (. multifn removeMethod dispatch-val))
 
 (defn prefer-method
-  "Causes the multimethod to prefer matches of dispatch-val-x over dispatch-val-y when there is a conflict"
+  "Causes the multimethod to prefer matches of dispatch-val-x over dispatch-val-y 
+   when there is a conflict"
   [#^clojure.lang.MultiFn multifn dispatch-val-x dispatch-val-y]
   (. multifn preferMethod dispatch-val-x dispatch-val-y))
 
@@ -1173,7 +1191,8 @@
 (defmacro if-let
   "bindings => binding-form test
 
-  If test is true, evaluates then with binding-form bound to the value of test, if not, yields else"
+  If test is true, evaluates then with binding-form bound to the value of 
+  test, if not, yields else"
   ([bindings then]
    `(if-let ~bindings ~then nil))
   ([bindings then else & oldform]
@@ -1350,7 +1369,7 @@
   [] (clojure.lang.Agent/releasePendingSends))
 
 (defn add-watch
-  "Experimental.
+  "Alpha - subject to change.
   Adds a watch function to an agent/atom/var/ref reference. The watch
   fn must be a fn of 4 args: a key, the reference, its old-state, its
   new-state. Whenever the reference's state might have been changed,
@@ -1367,32 +1386,11 @@
   [#^clojure.lang.IRef reference key fn] (.addWatch reference key fn))
 
 (defn remove-watch
-  "Experimental.
+  "Alpha - subject to change.
   Removes a watch (set by add-watch) from a reference"
   [#^clojure.lang.IRef reference key]
   (.removeWatch reference key))
 
-(defn add-watcher
-  "Experimental.
-  Adds a watcher to an agent/atom/var/ref reference. The watcher must
-  be an Agent, and the action a function of the agent's state and one
-  additional arg, the reference. Whenever the reference's state
-  changes, any registered watchers will have their actions
-  sent. send-type must be one of :send or :send-off. The actions will
-  be sent after the reference's state is changed. Var watchers are
-  triggered only by root binding changes, not thread-local set!s"
-  [#^clojure.lang.IRef reference send-type watcher-agent action-fn]
-  (add-watch reference watcher-agent
-    (fn [watcher-agent reference old-state new-state]
-      (when-not (identical? old-state new-state)
-        ((if (= send-type :send-off) send-off send)
-         watcher-agent action-fn reference)))))
-
-(defn remove-watcher
-  "Experimental.
-  Removes a watcher (set by add-watcher) from a reference"
-  [reference watcher-agent]
-  (remove-watch reference watcher-agent))
 
 (defn agent-errors
   "Returns a sequence of the exceptions thrown during asynchronous
@@ -1789,6 +1787,8 @@
     (apply concat (apply map f colls)))
 
 (defn filter
+  "Returns a lazy sequence of the items in coll for which
+  (pred item) returns true. pred must be free of side-effects."
   ([pred coll]
    (lazy-seq
     (when-let [s (seq coll)]
@@ -1955,10 +1955,9 @@
   "Returns the lines of text from rdr as a lazy sequence of strings.
   rdr must implement java.io.BufferedReader."
   [#^java.io.BufferedReader rdr]
-  (lazy-seq
-   (let [line  (. rdr (readLine))]
-     (when line
-       (cons line (line-seq rdr))))))
+  (let [line  (. rdr (readLine))]
+    (when line
+      (lazy-seq (cons line (line-seq rdr))))))
 
 (defn comparator
   "Returns an implementation of java.util.Comparator based upon pred."
@@ -2930,7 +2929,7 @@
                        conds (when (and (next body) (map? (first body))) 
                                            (first body))
                        body (if conds (next body) body)
-                       conds (or conds ^params)
+                       conds (or conds (meta params))
                        pre (:pre conds)
                        post (:post conds)                       
                        body (if post
@@ -3159,7 +3158,7 @@
   "test [v] finds fn at key :test in var metadata and calls it,
   presuming failure will throw exception"
   [v]
-    (let [f (:test ^v)]
+    (let [f (:test (meta v))]
       (if f
         (do (f) :ok)
         :no-test)))
@@ -3198,11 +3197,10 @@
   using java.util.regex.Matcher.find(), each such match processed with
   re-groups."
   [#^java.util.regex.Pattern re s]
-    (let [m (re-matcher re s)]
-      ((fn step []
-         (lazy-seq
-          (when (. m (find))
-            (cons (re-groups m) (step))))))))
+  (let [m (re-matcher re s)]
+    ((fn step []
+       (when (. m (find))
+         (lazy-seq (cons (re-groups m) (step))))))))
 
 (defn re-matches
   "Returns the match, if any, of string to pattern, using
@@ -3242,11 +3240,11 @@
 
 (defn print-doc [v]
   (println "-------------------------")
-  (println (str (ns-name (:ns ^v)) "/" (:name ^v)))
-  (prn (:arglists ^v))
-  (when (:macro ^v)
+  (println (str (ns-name (:ns (meta v))) "/" (:name (meta v))))
+  (prn (:arglists (meta v)))
+  (when (:macro (meta v))
     (println "Macro"))
-  (println " " (:doc ^v)))
+  (println " " (:doc (meta v))))
 
 (defn find-doc
   "Prints documentation for any var whose documentation or name
@@ -3255,9 +3253,9 @@
     (let [re  (re-pattern re-string-or-pattern)]
       (doseq [ns (all-ns)
               v (sort-by (comp :name meta) (vals (ns-interns ns)))
-              :when (and (:doc ^v)
-                         (or (re-find (re-matcher re (:doc ^v)))
-                             (re-find (re-matcher re (str (:name ^v))))))]
+              :when (and (:doc (meta v))
+                         (or (re-find (re-matcher re (:doc (meta v))))
+                             (re-find (re-matcher re (str (:name (meta v)))))))]
                (print-doc v))))
 
 (defn special-form-anchor
@@ -3285,7 +3283,7 @@
   [nspace]
   (println "-------------------------")
   (println (str (ns-name nspace)))
-  (println " " (:doc ^nspace)))
+  (println " " (:doc (meta nspace))))
 
 (defmacro doc
   "Prints documentation for a var or special form given its name"
@@ -3430,7 +3428,7 @@
       `(binding [*math-context* (java.math.MathContext. ~precision ~@rm)]
          ~@body)))
 
-(defn bound-fn
+(defn mk-bound-fn
   {:private true}
   [#^clojure.lang.Sorted sc test key]
   (fn [e]
@@ -3441,30 +3439,30 @@
   >=. Returns a seq of those entries with keys ek for
   which (test (.. sc comparator (compare ek key)) 0) is true"
   ([#^clojure.lang.Sorted sc test key]
-   (let [include (bound-fn sc test key)]
+   (let [include (mk-bound-fn sc test key)]
      (if (#{> >=} test)
        (when-let [[e :as s] (. sc seqFrom key true)]
          (if (include e) s (next s)))
        (take-while include (. sc seq true)))))
   ([#^clojure.lang.Sorted sc start-test start-key end-test end-key]
    (when-let [[e :as s] (. sc seqFrom start-key true)]
-     (take-while (bound-fn sc end-test end-key)
-                 (if ((bound-fn sc start-test start-key) e) s (next s))))))
+     (take-while (mk-bound-fn sc end-test end-key)
+                 (if ((mk-bound-fn sc start-test start-key) e) s (next s))))))
 
 (defn rsubseq
   "sc must be a sorted collection, test(s) one of <, <=, > or
   >=. Returns a reverse seq of those entries with keys ek for
   which (test (.. sc comparator (compare ek key)) 0) is true"
   ([#^clojure.lang.Sorted sc test key]
-   (let [include (bound-fn sc test key)]
+   (let [include (mk-bound-fn sc test key)]
      (if (#{< <=} test)
        (when-let [[e :as s] (. sc seqFrom key false)]
          (if (include e) s (next s)))
        (take-while include (. sc seq false)))))
   ([#^clojure.lang.Sorted sc start-test start-key end-test end-key]
    (when-let [[e :as s] (. sc seqFrom end-key false)]
-     (take-while (bound-fn sc start-test start-key)
-                 (if ((bound-fn sc end-test end-key) e) s (next s))))))
+     (take-while (mk-bound-fn sc start-test start-key)
+                 (if ((mk-bound-fn sc end-test end-key) e) s (next s))))))
 
 (defn repeatedly
   "Takes a function of no args, presumably with side effects, and returns an infinite
@@ -3472,8 +3470,13 @@
   [f] (lazy-seq (cons (f) (repeatedly f))))
 
 (defn add-classpath
-  "Adds the url (String or URL object) to the classpath per URLClassLoader.addURL"
-  [url] (. clojure.lang.RT addURL url))
+  "DEPRECATED 
+
+  Adds the url (String or URL object) to the classpath per
+  URLClassLoader.addURL"
+  [url]
+  (println "WARNING: add-classpath is deprecated")
+  (clojure.lang.RT/addURL url))
 
 
 
@@ -3493,7 +3496,7 @@
   (let [[pre-args [args expr]] (split-with (comp not vector?) decl)]
     `(do
        (defn ~name ~@pre-args ~args ~(apply (eval (list `fn args expr)) args))
-       (alter-meta! (var ~name) assoc :inline (fn ~args ~expr))
+       (alter-meta! (var ~name) assoc :inline (fn ~name ~args ~expr))
        (var ~name))))
 
 (defn empty
@@ -3504,8 +3507,9 @@
 
 (defmacro amap
   "Maps an expression across an array a, using an index named idx, and
-  return value named ret, initialized to a clone of a, then setting each element of
-  ret to the evaluation of expr, returning the new array ret."
+  return value named ret, initialized to a clone of a, then setting 
+  each element of ret to the evaluation of expr, returning the new 
+  array ret."
   [a idx ret expr]
   `(let [a# ~a
          ~ret (aclone a#)]
@@ -3518,8 +3522,8 @@
 
 (defmacro areduce
   "Reduces an expression across an array a, using an index named idx,
-  and return value named ret, initialized to init, setting ret to the evaluation of expr at
-  each step, returning ret."
+  and return value named ret, initialized to init, setting ret to the 
+  evaluation of expr at each step, returning ret."
   [a idx ret init expr]
   `(let [a# ~a]
      (loop  [~idx (int 0) ~ret ~init]
@@ -3533,6 +3537,34 @@
    :inline-arities #{1 2}}
   ([size-or-seq] (. clojure.lang.Numbers float_array size-or-seq))
   ([size init-val-or-seq] (. clojure.lang.Numbers float_array size init-val-or-seq)))
+
+(defn boolean-array
+  "Creates an array of booleans"
+  {:inline (fn [& args] `(. clojure.lang.Numbers boolean_array ~@args))
+   :inline-arities #{1 2}}
+  ([size-or-seq] (. clojure.lang.Numbers boolean_array size-or-seq))
+  ([size init-val-or-seq] (. clojure.lang.Numbers boolean_array size init-val-or-seq)))
+
+(defn byte-array
+  "Creates an array of bytes"
+  {:inline (fn [& args] `(. clojure.lang.Numbers byte_array ~@args))
+   :inline-arities #{1 2}}
+  ([size-or-seq] (. clojure.lang.Numbers byte_array size-or-seq))
+  ([size init-val-or-seq] (. clojure.lang.Numbers byte_array size init-val-or-seq)))
+
+(defn char-array
+  "Creates an array of chars"
+  {:inline (fn [& args] `(. clojure.lang.Numbers char_array ~@args))
+   :inline-arities #{1 2}}
+  ([size-or-seq] (. clojure.lang.Numbers char_array size-or-seq))
+  ([size init-val-or-seq] (. clojure.lang.Numbers char_array size init-val-or-seq)))
+
+(defn short-array
+  "Creates an array of shorts"
+  {:inline (fn [& args] `(. clojure.lang.Numbers short_array ~@args))
+   :inline-arities #{1 2}}
+  ([size-or-seq] (. clojure.lang.Numbers short_array size-or-seq))
+  ([size init-val-or-seq] (. clojure.lang.Numbers short_array size init-val-or-seq)))
 
 (defn double-array
   "Creates an array of doubles"
@@ -3549,11 +3581,27 @@
   ([size init-val-or-seq] (. clojure.lang.Numbers int_array size init-val-or-seq)))
 
 (defn long-array
-  "Creates an array of ints"
+  "Creates an array of longs"
   {:inline (fn [& args] `(. clojure.lang.Numbers long_array ~@args))
    :inline-arities #{1 2}}
   ([size-or-seq] (. clojure.lang.Numbers long_array size-or-seq))
   ([size init-val-or-seq] (. clojure.lang.Numbers long_array size init-val-or-seq)))
+
+(definline booleans
+  "Casts to boolean[]"
+  [xs] `(. clojure.lang.Numbers booleans ~xs))
+
+(definline bytes
+  "Casts to bytes[]"
+  [xs] `(. clojure.lang.Numbers bytes ~xs))
+
+(definline chars
+  "Casts to chars[]"
+  [xs] `(. clojure.lang.Numbers chars ~xs))
+
+(definline shorts
+  "Casts to shorts[]"
+  [xs] `(. clojure.lang.Numbers shorts ~xs))
 
 (definline floats
   "Casts to float[]"
@@ -3790,9 +3838,8 @@
           row-struct (apply create-struct keys)
           row-values (fn [] (map (fn [#^Integer i] (. rs (getObject i))) idxs))
           rows (fn thisfn []
-                   (lazy-seq
-                    (when (. rs (next))
-                      (cons (apply struct row-struct (row-values)) (thisfn)))))]
+                 (when (. rs (next))
+                   (lazy-seq (cons (apply struct row-struct (row-values)) (thisfn)))))]
       (rows)))
 
 (defn iterator-seq
@@ -4252,11 +4299,11 @@
   metadata from the name symbol.  Returns the var."
   ([ns #^clojure.lang.Symbol name]
      (let [v (clojure.lang.Var/intern (the-ns ns) name)]
-       (when ^name (.setMeta v ^name))
+       (when (meta name) (.setMeta v (meta name)))
        v))
   ([ns name val]
      (let [v (clojure.lang.Var/intern (the-ns ns) name val)]
-       (when ^name (.setMeta v ^name))
+       (when (meta name) (.setMeta v (meta name)))
        v)))
 
 (defmacro while
@@ -4528,7 +4575,7 @@
          "-SNAPSHOT")))
 
 (defn promise
-  "Experimental.
+  "Alpha - subject to change.
   Returns a promise object that can be read with deref/@, and set,
   once only, with deliver. Calls to deref/@ prior to delivery will
   block. All subsequent derefs will return the same delivered value
@@ -4547,32 +4594,36 @@
             (throw (IllegalStateException. "Multiple deliver calls to a promise"))))))))
 
 (defn deliver
-  "Experimental.
+  "Alpha - subject to change.
   Delivers the supplied value to the promise, releasing any pending
   derefs. A subsequent call to deliver on a promise will throw an exception."  
   [promise val] (promise val))
 
 ;;;;;;;;;;;;;;;;;;;;; editable collections ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn transient 
-  "Returns a new, transient version of the collection, in constant time."
+  "Alpha - subject to change.
+  Returns a new, transient version of the collection, in constant time."
   [#^clojure.lang.IEditableCollection coll] 
   (.asTransient coll))
 
 (defn persistent! 
-  "Returns a new, persistent version of the transient collection, in
+  "Alpha - subject to change.
+  Returns a new, persistent version of the transient collection, in
   constant time. The transient collection cannot be used after this
   call, any such use will throw an exception."
   [#^clojure.lang.ITransientCollection coll]
   (.persistent coll))
 
 (defn conj!
-  "Adds x to the transient collection, and return coll. The 'addition'
+  "Alpha - subject to change.
+  Adds x to the transient collection, and return coll. The 'addition'
   may happen at different 'places' depending on the concrete type."
   [#^clojure.lang.ITransientCollection coll x]
   (.conj coll x))
 
 (defn assoc!
-  "When applied to a transient map, adds mapping of key(s) to
+  "Alpha - subject to change.
+  When applied to a transient map, adds mapping of key(s) to
   val(s). When applied to a transient vector, sets the val at index.
   Note - index must be <= (count vector). Returns coll."
   ([#^clojure.lang.ITransientAssociative coll key val] (.assoc coll key val))
@@ -4583,7 +4634,8 @@
        ret))))
 
 (defn dissoc!
-  "Returns a transient map that doesn't contain a mapping for key(s)."
+  "Alpha - subject to change.
+  Returns a transient map that doesn't contain a mapping for key(s)."
   ([#^clojure.lang.ITransientMap map key] (.without map key))
   ([#^clojure.lang.ITransientMap map key & ks]
    (let [ret (.without map key)]
@@ -4592,13 +4644,15 @@
        ret))))
 
 (defn pop!
-  "Removes the last item from a transient vector. If
+  "Alpha - subject to change.
+  Removes the last item from a transient vector. If
   the collection is empty, throws an exception. Returns coll"
   [#^clojure.lang.ITransientVector coll] 
   (.pop coll)) 
 
 (defn disj!
-  "disj[oin]. Returns a transient set of the same (hashed/sorted) type, that
+  "Alpha - subject to change.
+  disj[oin]. Returns a transient set of the same (hashed/sorted) type, that
   does not contain key(s)."
   ([set] set)
   ([#^clojure.lang.ITransientSet set key]
