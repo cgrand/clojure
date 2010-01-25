@@ -14,18 +14,7 @@ package clojure.lang;
 
 import java.io.Serializable;
 
-public abstract class AFn extends Obj implements IFn, Serializable{
-
-public AFn(IPersistentMap meta){
-	super(meta);
-}
-
-public AFn(){
-}
-
-public Obj withMeta(IPersistentMap meta){
-	throw new UnsupportedOperationException();
-}
+public abstract class AFn implements IFn, Serializable{
 
 public Object call() throws Exception{
 	return invoke();
@@ -161,37 +150,40 @@ public Object invoke(Object arg1, Object arg2, Object arg3, Object arg4, Object 
 }
 
 public Object applyTo(ISeq arglist) throws Exception{
-	return applyToHelper(this, arglist);
+	return applyToHelper(this, Util.ret1(arglist,arglist = null));
 }
 
 static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 	switch(RT.boundedLength(arglist, 20))
 		{
 		case 0:
+			arglist = null;
 			return ifn.invoke();
 		case 1:
-			return ifn.invoke(arglist.first());
+			Object a1 = arglist.first();
+			arglist = null;
+			return ifn.invoke(a1);
 		case 2:
 			return ifn.invoke(arglist.first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 3:
 			return ifn.invoke(arglist.first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 4:
 			return ifn.invoke(arglist.first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 5:
 			return ifn.invoke(arglist.first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 6:
 			return ifn.invoke(arglist.first()
@@ -199,7 +191,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 7:
 			return ifn.invoke(arglist.first()
@@ -208,7 +200,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 8:
 			return ifn.invoke(arglist.first()
@@ -218,7 +210,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 9:
 			return ifn.invoke(arglist.first()
@@ -229,7 +221,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 10:
 			return ifn.invoke(arglist.first()
@@ -241,7 +233,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 11:
 			return ifn.invoke(arglist.first()
@@ -254,7 +246,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 12:
 			return ifn.invoke(arglist.first()
@@ -268,7 +260,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 13:
 			return ifn.invoke(arglist.first()
@@ -283,7 +275,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 14:
 			return ifn.invoke(arglist.first()
@@ -299,7 +291,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 15:
 			return ifn.invoke(arglist.first()
@@ -316,7 +308,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 16:
 			return ifn.invoke(arglist.first()
@@ -334,7 +326,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 17:
 			return ifn.invoke(arglist.first()
@@ -353,7 +345,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 18:
 			return ifn.invoke(arglist.first()
@@ -373,7 +365,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 19:
 			return ifn.invoke(arglist.first()
@@ -394,7 +386,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		case 20:
 			return ifn.invoke(arglist.first()
@@ -416,7 +408,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, (arglist = arglist.next()).first()
+					, Util.ret1((arglist = arglist.next()).first(),arglist = null)
 			);
 		default:
 			return ifn.invoke(arglist.first()
@@ -439,7 +431,7 @@ static public Object applyToHelper(IFn ifn, ISeq arglist) throws Exception{
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
 					, (arglist = arglist.next()).first()
-					, RT.seqToArray(arglist.next()));
+					, RT.seqToArray(Util.ret1(arglist.next(),arglist = null)));
 		}
 }
 

@@ -16,7 +16,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.io.Serializable;
 
-public class PersistentStructMap extends APersistentMap{
+public class PersistentStructMap extends APersistentMap implements IObj{
 
 public static class Def implements Serializable{
 	final ISeq keys;
@@ -31,17 +31,21 @@ public static class Def implements Serializable{
 final Def def;
 final Object[] vals;
 final IPersistentMap ext;
+final IPersistentMap _meta;
+
 
 static public Def createSlotMap(ISeq keys){
 	if(keys == null)
 		throw new IllegalArgumentException("Must supply keys");
-	PersistentHashMap ret = PersistentHashMap.EMPTY;
+	int c = RT.count(keys);
+	Object[] v = new Object[2*c];
 	int i = 0;
 	for(ISeq s = keys; s != null; s = s.next(), i++)
 		{
-		ret = (PersistentHashMap) ret.assoc(s.first(), i);
+		v[2*i] =  s.first();
+		v[2*i+1] = i;
 		}
-	return new Def(keys, ret);
+	return new Def(keys, RT.map(v));
 }
 
 static public PersistentStructMap create(Def def, ISeq keyvals){
@@ -92,7 +96,7 @@ static public IFn getAccessor(final Def def, Object key){
 }
 
 protected PersistentStructMap(IPersistentMap meta, Def def, Object[] vals, IPersistentMap ext){
-	super(meta);
+	this._meta = meta;
 	this.ext = ext;
 	this.def = def;
 	this.vals = vals;
@@ -109,10 +113,14 @@ protected PersistentStructMap makeNew(IPersistentMap meta, Def def, Object[] val
 	return new PersistentStructMap(meta, def, vals, ext);
 }
 
-public Obj withMeta(IPersistentMap meta){
+public IObj withMeta(IPersistentMap meta){
 	if(meta == _meta)
 		return this;
 	return makeNew(meta, def, vals, ext);
+}
+
+public IPersistentMap meta(){
+	return _meta;
 }
 
 public boolean containsKey(Object key){
@@ -141,19 +149,19 @@ public IPersistentMap assoc(Object key, Object val){
 }
 
 public Object valAt(Object key){
-	Map.Entry e = def.keyslots.entryAt(key);
-	if(e != null)
+	Integer i = (Integer) def.keyslots.valAt(key);
+	if(i != null)
 		{
-		return vals[(Integer) e.getValue()];
+		return vals[i];
 		}
 	return ext.valAt(key);
 }
 
 public Object valAt(Object key, Object notFound){
-	Map.Entry e = def.keyslots.entryAt(key);
-	if(e != null)
+	Integer i = (Integer) def.keyslots.valAt(key);
+	if(i != null)
 		{
-		return vals[(Integer) e.getValue()];
+		return vals[i];
 		}
 	return ext.valAt(key, notFound);
 }

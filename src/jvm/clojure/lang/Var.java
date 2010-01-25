@@ -128,6 +128,8 @@ public boolean isBound(){
 }
 
 final public Object get(){
+	if(count.get() == 0 && root != dvals)
+		return root;
 	return deref();
 }
 
@@ -206,6 +208,10 @@ public Object getRoot(){
 	if(hasRoot())
 		return root;
 	throw new IllegalStateException(String.format("Var %s/%s is unbound.", ns, sym));
+}
+
+public Object getRawRoot(){
+		return root;
 }
 
 public Object getTag(){
