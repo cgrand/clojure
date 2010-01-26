@@ -1130,7 +1130,10 @@
   ([x form] (if (seq? form)
               (with-meta `(~(first form) ~x ~@(next form)) (meta form))
               (list form x)))
-  ([x form & more] `(-> (-> ~x ~form) ~@more)))
+  ([x form & more] 
+    (if (and (#{'-> '->> `-> `->>} form) (not (contains? &env form)))
+      (list* form x more) 
+      `(-> (-> ~x ~form) ~@more))))
 
 (defmacro ->>
   "Threads the expr through the forms. Inserts x as the
@@ -1140,7 +1143,10 @@
   ([x form] (if (seq? form)
               (with-meta `(~(first form) ~@(next form)  ~x) (meta form))
               (list form x)))
-  ([x form & more] `(->> (->> ~x ~form) ~@more)))
+  ([x form & more] 
+    (if (and (#{'-> '->> `-> `->>} form) (not (contains? &env form)))
+      (list* form x more) 
+      `(->> (->> ~x ~form) ~@more))))
 
 ;;multimethods
 (def global-hierarchy)
