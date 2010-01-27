@@ -1121,33 +1121,6 @@
   ([x form] `(. ~x ~form))
   ([x form & more] `(.. (. ~x ~form) ~@more)))
 
-(defmacro ->
-  "Threads the expr through the forms. Inserts x as the
-  second item in the first form, making a list of it if it is not a
-  list already. If there are more forms, inserts the first form as the
-  second item in second form, etc."
-  ([x] x)
-  ([x form] (if (seq? form)
-              (with-meta `(~(first form) ~x ~@(next form)) (meta form))
-              (list form x)))
-  ([x form & more] 
-    (if (and (#{'-> '->> `-> `->>} form) (not (contains? &env form)))
-      (list* form x more) 
-      `(-> (-> ~x ~form) ~@more))))
-
-(defmacro ->>
-  "Threads the expr through the forms. Inserts x as the
-  last item in the first form, making a list of it if it is not a
-  list already. If there are more forms, inserts the first form as the
-  last item in second form, etc."
-  ([x form] (if (seq? form)
-              (with-meta `(~(first form) ~@(next form)  ~x) (meta form))
-              (list form x)))
-  ([x form & more] 
-    (if (and (#{'-> '->> `-> `->>} form) (not (contains? &env form)))
-      (list* form x more) 
-      `(->> (->> ~x ~form) ~@more))))
-
 ;;multimethods
 (def global-hierarchy)
 
@@ -2750,8 +2723,8 @@
   "Sequentially read and evaluate the set of forms contained in the
   string"
   [s]
-  (let [rdr (-> (java.io.StringReader. s)
-                (clojure.lang.LineNumberingPushbackReader.))]
+  (let [rdr (clojure.lang.LineNumberingPushbackReader. 
+              (java.io.StringReader. s))]
     (load-reader rdr)))
 
 (defn set
@@ -2964,6 +2937,36 @@
         (recur (dec n) (next xs))
         xs)))
 
+(declare ->>)
+
+(defmacro ->
+  "Threads the expr through the forms. Inserts x as the
+  second item in the first form, making a list of it if it is not a
+  list already. If there are more forms, inserts the first form as the
+  second item in second form, etc."
+  ([x] x)
+  ([x form] (if (seq? form)
+              (with-meta `(~(first form) ~x ~@(next form)) (meta form))
+              (list form x)))
+  ([x form & more] 
+    (if (and (symbol? form) (not (contains? &env form))
+          (#{#'-> #'->>} (resolve form)))
+      (list* form x more) 
+      `(-> (-> ~x ~form) ~@more))))
+
+(defmacro ->>
+  "Threads the expr through the forms. Inserts x as the
+  last item in the first form, making a list of it if it is not a
+  list already. If there are more forms, inserts the first form as the
+  last item in second form, etc."
+  ([x form] (if (seq? form)
+              (with-meta `(~(first form) ~@(next form)  ~x) (meta form))
+              (list form x)))
+  ([x form & more] 
+    (if (and (symbol? form) (not (contains? &env form))
+          (#{#'-> #'->>} (resolve form)))
+      (list* form x more) 
+      `(->> (->> ~x ~form) ~@more))))
 
 ;redefine let and loop  with destructuring
 (defn destructure [bindings]
