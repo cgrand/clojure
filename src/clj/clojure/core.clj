@@ -1121,26 +1121,36 @@
   ([x form] `(. ~x ~form))
   ([x form & more] `(.. (. ~x ~form) ~@more)))
 
-(defmacro ->
+(defmacro defthread-macro 
+  [name docstring args & body]
+  (if (vector? docstring)
+    `(defthread-macro ~name nil ~docstring ~args ~@body)
+    (let [x (first args)
+          form (second args)]
+      `(defmacro ~name
+         ~@(when docstring [docstring]) 
+         {:arglists '([~x] [~x ~form] [~x ~form & ~'more])} 
+         ([x#] x#)
+         ([x# form#] 
+           (let [form# (if (seq? form#) form# (list form#))
+                 ~x x#
+                 ~form form#]
+             (with-meta (do ~@body) (meta form#))))
+         ([x# form# & more#] `(~'~name (~'~name ~x# ~form#) ~@more#))))))
+
+(defthread-macro ->
   "Threads the expr through the forms. Inserts x as the
   second item in the first form, making a list of it if it is not a
   list already. If there are more forms, inserts the first form as the
   second item in second form, etc."
-  ([x] x)
-  ([x form] (if (seq? form)
-              (with-meta `(~(first form) ~x ~@(next form)) (meta form))
-              (list form x)))
-  ([x form & more] `(-> (-> ~x ~form) ~@more)))
+  [x form] (list* (first form) x (rest form)))
 
-(defmacro ->>
+(defthread-macro ->>
   "Threads the expr through the forms. Inserts x as the
   last item in the first form, making a list of it if it is not a
   list already. If there are more forms, inserts the first form as the
   last item in second form, etc."
-  ([x form] (if (seq? form)
-              (with-meta `(~(first form) ~@(next form)  ~x) (meta form))
-              (list form x)))
-  ([x form & more] `(->> (->> ~x ~form) ~@more)))
+  [x form] (concat form [x]))
 
 ;;multimethods
 (def global-hierarchy)
