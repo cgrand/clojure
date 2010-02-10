@@ -1121,27 +1121,6 @@
   ([x form] `(. ~x ~form))
   ([x form & more] `(.. (. ~x ~form) ~@more)))
 
-(defmacro ->
-  "Threads the expr through the forms. Inserts x as the
-  second item in the first form, making a list of it if it is not a
-  list already. If there are more forms, inserts the first form as the
-  second item in second form, etc."
-  ([x] x)
-  ([x form] (if (seq? form)
-              (with-meta `(~(first form) ~x ~@(next form)) (meta form))
-              (list form x)))
-  ([x form & more] `(-> (-> ~x ~form) ~@more)))
-
-(defmacro ->>
-  "Threads the expr through the forms. Inserts x as the
-  last item in the first form, making a list of it if it is not a
-  list already. If there are more forms, inserts the first form as the
-  last item in second form, etc."
-  ([x form] (if (seq? form)
-              (with-meta `(~(first form) ~@(next form)  ~x) (meta form))
-              (list form x)))
-  ([x form & more] `(->> (->> ~x ~form) ~@more)))
-
 ;;multimethods
 (def global-hierarchy)
 
@@ -2743,8 +2722,8 @@
   "Sequentially read and evaluate the set of forms contained in the
   string"
   [s]
-  (let [rdr (-> (java.io.StringReader. s)
-                (clojure.lang.LineNumberingPushbackReader.))]
+  (let [rdr (clojure.lang.LineNumberingPushbackReader. 
+              (java.io.StringReader. s))]
     (load-reader rdr)))
 
 (defn set
@@ -2934,15 +2913,54 @@
 
 (defn ns-resolve
   "Returns the var or Class to which a symbol will be resolved in the
-  namespace, else nil.  Note that if the symbol is fully qualified,
-  the var/Class to which it resolves need not be present in the
-  namespace."
-  [ns sym]
-  (clojure.lang.Compiler/maybeResolveIn (the-ns ns) sym))
+  namespace (unless found in the environement), else nil.  Note that if the 
+  symbol is fully qualified, the var/Class to which it resolves need not be 
+  present in the namespace."
+  ([ns sym]
+    (ns-resolve ns nil sym))
+  ([ns env sym]
+    (when-not (contains? env sym)
+      (clojure.lang.Compiler/maybeResolveIn (the-ns ns) sym))))
 
 (defn resolve
-  "same as (ns-resolve *ns* symbol)"
-  [sym] (ns-resolve *ns* sym))
+  "same as (ns-resolve *ns* symbol) or (ns-resolve *ns* &env symbol)"
+  ([sym] (ns-resolve *ns* sym))
+  ([env sym] (ns-resolve *ns* env sym)))
+
+(defmacro defthread-macro 
+  [name docstring args & body]
+  (if (vector? docstring)
+    `(defthread-macro ~name nil ~docstring ~args ~@body)
+    (let [x (first args)
+          form (second args)]
+      `(defmacro ~name
+         ~@(when docstring [docstring]) 
+         {:arglists '([~x] [~x ~form] [~x ~form & ~'more])
+          :thread-op true} 
+         ([x#] x#)
+         ([x# form#] 
+           (let [form# (if (seq? form#) form# (list form#))
+                 ~x x#
+                 ~form form#]
+             (with-meta (do ~@body) (meta form#))))
+         ([x# form# & more#] 
+           (if (and (symbol? form#) (:thread-op (meta (resolve ~'&env form#))))
+             `(~form# ~x# ~@more#)
+             `(~'~name (~'~name ~x# ~form#) ~@more#)))))))
+
+(defthread-macro ->
+  "Threads the expr through the forms. Inserts x as the
+  second item in the first form, making a list of it if it is not a
+  list already. If there are more forms, inserts the first form as the
+  second item in second form, etc."
+  [x form] (list* (first form) x (rest form)))
+
+(defthread-macro ->>
+  "Threads the expr through the forms. Inserts x as the
+  last item in the first form, making a list of it if it is not a
+  list already. If there are more forms, inserts the first form as the
+  last item in second form, etc."
+  [x form] (concat form [x]))
 
 (defn array-map
   "Constructs an array-map."
