@@ -3340,10 +3340,11 @@
                            (if (seq bes)
                              (let [bb (key (first bes))
                                    bk (val (first bes))
-                                   has-default (contains? defaults bb)]
-                               (recur (pb ret bb (if has-default
-                                                   (list `get gmap bk (defaults bb))
-                                                   (list `get gmap bk)))
+                                   args (when (contains? defaults bb)
+                                          (list (defaults bb))) ]
+                               (recur (pb ret bb (if (keyword? bk)
+                                                   (list* bk gmap args)
+                                                   (list `get gmap args)))
                                       (next bes)))
                              ret))))]
                  (cond
