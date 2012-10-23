@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
  Any errors are my own
  */
 
-public class PersistentHashMap extends APersistentMap implements IEditableCollection, IObj {
+public class PersistentHashMap extends APersistentMap implements IEditableCollection, IObj, IKeywordLookup {
 
 final int count;
 final INode root;
@@ -233,7 +233,7 @@ public IPersistentMap meta(){
 	return _meta;
 }
 
-static final class TransientHashMap extends ATransientMap {
+static final class TransientHashMap extends ATransientMap implements IKeywordLookup {
 	AtomicReference<Thread> edit;
 	INode root;
 	int count;
@@ -319,6 +319,21 @@ static final class TransientHashMap extends ATransientMap {
 		if(owner != null)
 			throw new IllegalAccessError("Transient used by non-owner thread");
 		throw new IllegalAccessError("Transient used after persistent! call");
+	}
+	
+	public ILookupThunk getLookupThunk(final Keyword k) {
+		final int h = hash(k);
+		
+		return new ILookupThunk() {
+			public Object get(Object target) {
+				if (target instanceof TransientHashMap) {
+					ensureEditable();
+					final INode n = ((TransientHashMap) target).root;
+					return n == null ? null : n.find(0, h, k, null);					
+				}
+				return this;
+			}
+		};
 	}
 }
 
@@ -1175,6 +1190,20 @@ static final class NodeSeq extends ASeq {
 			return create(array, i, s.next());
 		return create(array, i + 2, null);
 	}
+}
+
+public ILookupThunk getLookupThunk(final Keyword k) {
+	final int h = hash(k);
+	
+	return new ILookupThunk() {
+		public Object get(Object target) {
+			if (target instanceof PersistentHashMap) {
+				final INode n = ((PersistentHashMap) target).root;
+				return n == null ? null : n.find(0, h, k, null);				
+			}
+			return this;
+		}
+	};
 }
 
 }
