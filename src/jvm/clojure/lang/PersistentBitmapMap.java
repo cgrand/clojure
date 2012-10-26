@@ -63,7 +63,7 @@ IPersistentMap createHT(Object[] init){
 	return PersistentHashMap.create(meta(), init);
 }
 
-static public PersistentBitmapMap createWithCheck(Object[] init){
+static public IPersistentMap createWithCheck(Object[] init){
 	ITransientMap ret = EMPTY.asTransient();
 	for(int i = 0; i < init.length; i += 2)
 		{
@@ -71,16 +71,19 @@ static public PersistentBitmapMap createWithCheck(Object[] init){
 		if(ret.count() != i/2 + 1)
 			throw new IllegalArgumentException("Duplicate key: " + init[i]);
 		}
-	return (PersistentBitmapMap) ret.persistent();
+	return ret.persistent();
 }
 
-static public PersistentBitmapMap createAsIfByAssoc(Object[] init){
+static public IPersistentMap create(ISeq items){
 	ITransientMap ret = EMPTY.asTransient();
-	for(int i = 0; i < init.length; i += 2)
-		ret = ret.assoc(init[i], init[i + 1]);
-	return (PersistentBitmapMap) ret.persistent();
+	for(; items != null; items = items.next().next())
+		{
+		if(items.next() == null)
+			throw new IllegalArgumentException(String.format("No value supplied for key: %s", items.first()));
+		ret = ret.assoc(items.first(), RT.second(items));
+		}
+	return ret.persistent();
 }
-
 /**
  * This ctor captures/aliases the passed array, so do not modify later
  *
@@ -112,11 +115,11 @@ static int index(long bitmap, long bitmask) {
 }
 
 static long bitmask1(int hash) {
-	return 1 << (hash & 0x1f);
+	return 1 << (hash & 0x3f);
 }
 
 static long bitmask2(int hash) {
-	return 0x20 << ((hash & 0x3e0) >> 32);
+	return 1 << ((hash >>> 64) & 0x3f);
 }
 
 public boolean containsKey(Object key){
@@ -188,7 +191,8 @@ public IPersistentMap assoc(Object key, Object val){
 }
 
 public IPersistentMap without(Object key){
-	long m = assocMaskOf(key);
+	// TOOO evaluate fastIndexOf + bit twiddling to find the bit by its rank
+	long m = dissocMaskOf(key);
 	if((m & bitmap) != 0) //have key, will remove
 		{
 		int newlen = array.length - 2;
@@ -231,35 +235,28 @@ private int fastIndexOf(Object key) {
 }
 
 private int indexOf(Object key){
+	// first try a linear scan to find the identical key
 	int i = fastIndexOf(key);
 	if (i >= 0) return i;
 
 	int h = hash(key);
-	long mask1 = bitmask1(h);
-	int idx1;
-	Object k1;
-	if ((bitmap & mask1) != 0) {
-		idx1 = index(bitmap, mask1);
-		k1 = array[idx1];
-		if (k1 == key) return idx1;
-	} else {
-		idx1 = -1;
-		k1 = null;
+	long mask = bitmask1(h);
+	if ((bitmap & mask) != 0) {
+		i = index(bitmap, mask);
+		if (Util.equiv(key, array[i])) return i;
 	}
-	long mask2 = bitmask2(h);
-	if ((bitmap & mask2) != 0) {
-		int idx2 = index(bitmap, mask2);
-		Object k2 = array[idx2];
-		if ((key == k2) || Util.equiv(key, k2)) return idx2;
+	mask = bitmask2(h);
+	if ((bitmap & mask) != 0) {
+		i = index(bitmap, mask);
+		if (Util.equiv(key, array[i])) return i;
 	}
-	if ((idx1 >= 0) && (Util.equiv(key, k1))) return idx1;
 	return -1;
 }
 
-private long assocMaskOf(Object key){
+private long dissocMaskOf(Object key){
 	int h = hash(key);
 	long mask1 = bitmask1(h);
-	int idx1, idx2;
+	int idx1;
 	Object k1;
 	if ((bitmap & mask1) != 0) {
 		idx1 = index(bitmap, mask1);
@@ -271,14 +268,29 @@ private long assocMaskOf(Object key){
 	}
 	long mask2 = bitmask2(h);
 	if ((bitmap & mask2) != 0) {
-		idx2 = index(bitmap, mask2);
+		int idx2 = index(bitmap, mask2);
 		Object k2 = array[idx2];
 		if ((key == k2) || Util.equiv(key, k2)) return mask2;
-	} else {
-		idx2 = -1;
 	}
-	if ((idx1 < 0) || (Util.equiv(key, k1))) return mask1;
-	if (idx2 < 0) return mask2;
+	if ((idx1 >= 0) || (Util.equiv(key, k1))) return mask1;
+	return 0;
+}
+
+private long assocMaskOf(Object key){
+	int h = hash(key);
+	long mask2 = bitmask2(h);
+	int i2 = -1;
+	if ((bitmap & mask2) != 0) {
+		i2 = index(bitmap, mask2);
+		if (Util.equiv(key, array[i2])) return mask2;
+	}
+	long mask1 = bitmask1(h);
+	if ((bitmap & mask1) != 0) {
+		int i1 = index(bitmap, mask1);
+		if (Util.equiv(key, array[i1])) return mask1;
+	} else
+		return mask1;
+	if (i2 < 0) return mask2;
 	return 0;
 }
 
@@ -408,35 +420,28 @@ static final class TransientBitmapMap extends ATransientMap {
 	}
 
 	private int indexOf(Object key){
+		// first try a linear scan to find the identical key
 		int i = fastIndexOf(key);
 		if (i >= 0) return i;
 
 		int h = hash(key);
-		long mask1 = bitmask1(h);
-		int idx1;
-		Object k1;
-		if ((bitmap & mask1) != 0) {
-			idx1 = index(bitmap, mask1);
-			k1 = array[idx1];
-			if (k1 == key) return idx1;
-		} else {
-			idx1 = -1;
-			k1 = null;
+		long mask = bitmask1(h);
+		if ((bitmap & mask) != 0) {
+			i = index(bitmap, mask);
+			if (Util.equiv(key, array[i])) return i;
 		}
-		long mask2 = bitmask2(h);
-		if ((bitmap & mask2) != 0) {
-			int idx2 = index(bitmap, mask2);
-			Object k2 = array[idx2];
-			if ((key == k2) || Util.equiv(key, k2)) return idx2;
+		mask = bitmask2(h);
+		if ((bitmap & mask) != 0) {
+			i = index(bitmap, mask);
+			if (Util.equiv(key, array[i])) return i;
 		}
-		if ((idx1 >= 0) && (Util.equiv(key, k1))) return idx1;
 		return -1;
 	}
 
-	private long assocMaskOf(Object key){
+	private long dissocMaskOf(Object key){
 		int h = hash(key);
 		long mask1 = bitmask1(h);
-		int idx1, idx2;
+		int idx1;
 		Object k1;
 		if ((bitmap & mask1) != 0) {
 			idx1 = index(bitmap, mask1);
@@ -448,14 +453,29 @@ static final class TransientBitmapMap extends ATransientMap {
 		}
 		long mask2 = bitmask2(h);
 		if ((bitmap & mask2) != 0) {
-			idx2 = index(bitmap, mask2);
+			int idx2 = index(bitmap, mask2);
 			Object k2 = array[idx2];
 			if ((key == k2) || Util.equiv(key, k2)) return mask2;
-		} else {
-			idx2 = -1;
 		}
-		if ((idx1 < 0) || (Util.equiv(key, k1))) return mask1;
-		if (idx2 < 0) return mask2;
+		if ((idx1 >= 0) || (Util.equiv(key, k1))) return mask1;
+		return 0;
+	}
+
+	private long assocMaskOf(Object key){
+		int h = hash(key);
+		long mask2 = bitmask2(h);
+		int i2 = -1;
+		if ((bitmap & mask2) != 0) {
+			i2 = index(bitmap, mask2);
+			if (Util.equiv(key, array[i2])) return mask2;
+		}
+		long mask1 = bitmask1(h);
+		if ((bitmap & mask1) != 0) {
+			int i1 = index(bitmap, mask1);
+			if (Util.equiv(key, array[i1])) return mask1;
+		} else
+			return mask1;
+		if (i2 < 0) return mask2;
 		return 0;
 	}
 
@@ -482,7 +502,7 @@ static final class TransientBitmapMap extends ATransientMap {
 		if(len >= array.length)
 			return PersistentHashMap.create(array).asTransient().assoc(key, val);
 		i = index(bitmap, m);
-		System.arraycopy(array, i, array, i+2, array.length - i);
+		System.arraycopy(array, i, array, i+2, len - i);
 		array[i] = key;
 		array[i + 1] = val;
 		len += 2;
@@ -491,7 +511,7 @@ static final class TransientBitmapMap extends ATransientMap {
 	}
 
 	ITransientMap doWithout(Object key) {
-		long m = assocMaskOf(key);
+		long m = dissocMaskOf(key);
 		if((m & bitmap) != 0) //have key, will remove
 			{
 			int i = index(bitmap, m);
