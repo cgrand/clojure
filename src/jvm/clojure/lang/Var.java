@@ -80,7 +80,7 @@ static final ThreadLocal<Frame> dvals = new ThreadLocal<Frame>(){
 static public volatile int rev = 0;
 
 static Keyword privateKey = Keyword.intern(null, "private");
-static IPersistentMap privateMeta = new PersistentArrayMap(new Object[]{privateKey, Boolean.TRUE});
+static IPersistentMap privateMeta = PersistentBitmapMap.EMPTY.assoc(privateKey, Boolean.TRUE);
 static Keyword macroKey = Keyword.intern(null, "macro");
 static Keyword nameKey = Keyword.intern(null, "name");
 static Keyword nsKey = Keyword.intern(null, "ns");

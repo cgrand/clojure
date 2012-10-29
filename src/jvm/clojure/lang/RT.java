@@ -689,7 +689,7 @@ static Object getFrom(Object coll, Object key, Object notFound){
 
 static public Associative assoc(Object coll, Object key, Object val){
 	if(coll == null)
-		return new PersistentArrayMap(new Object[]{key, val});
+		return PersistentBitmapMap.EMPTY.assoc(key, val);
 	return ((Associative) coll).assoc(key, val);
 }
 
@@ -1447,17 +1447,17 @@ static public double uncheckedDoubleCast(double x){
 
 static public IPersistentMap map(Object... init){
 	if(init == null)
-		return PersistentArrayMap.EMPTY;
-	else if(init.length <= PersistentArrayMap.HASHTABLE_THRESHOLD)
-		return PersistentArrayMap.createWithCheck(init);
+		return PersistentBitmapMap.EMPTY;
+	else if(init.length <= PersistentBitmapMap.HASHTABLE_THRESHOLD)
+		return PersistentBitmapMap.createWithCheck(init);
 	return PersistentHashMap.createWithCheck(init);
 }
 
 static public IPersistentMap mapUniqueKeys(Object... init){
 	if(init == null)
-		return PersistentArrayMap.EMPTY;
-	else if(init.length <= PersistentArrayMap.HASHTABLE_THRESHOLD)
-		return new PersistentArrayMap(init);
+		return PersistentBitmapMap.EMPTY;
+	else if(init.length <= PersistentBitmapMap.HASHTABLE_THRESHOLD)
+		return PersistentBitmapMap.create(init);
 	return PersistentHashMap.create(init);
 }
 
