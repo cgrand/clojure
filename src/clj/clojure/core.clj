@@ -3946,6 +3946,15 @@
   ([& keyvals]
      (clojure.lang.PersistentArrayMap/createAsIfByAssoc (to-array keyvals))))
 
+(defn bitmap-map
+  "Constructs a bitmap-map. If any keys are equal, they are handled as
+  if by repeated uses of assoc."
+  {:added "1.6"
+   :static true}
+  ([] (. clojure.lang.PersistentBitmapMap EMPTY))
+  ([& keyvals]
+     (clojure.lang.PersistentBitmapMap/create (to-array keyvals))))
+
 ;redefine let and loop  with destructuring
 (defn destructure [bindings]
   (let [bents (partition 2 bindings)
