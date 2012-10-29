@@ -50,8 +50,12 @@ static public IPersistentMap create(Map other){
  * @param init {key1,val1,key2,val2,...}
  */
 public static PersistentHashMap create(Object... init){
+	return create(init, init.length);
+}
+
+static PersistentHashMap create(Object[] init, int len){
 	ITransientMap ret = EMPTY.asTransient();
-	for(int i = 0; i < init.length; i += 2)
+	for(int i = 0; i < len; i += 2)
 		{
 		ret = ret.assoc(init[i], init[i + 1]);
 		}

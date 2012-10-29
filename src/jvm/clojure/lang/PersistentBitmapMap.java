@@ -84,6 +84,16 @@ static public IPersistentMap create(ISeq items){
 		}
 	return ret.persistent();
 }
+
+static public IPersistentMap create(Object[] items){
+	ITransientMap ret = EMPTY.asTransient();
+	for(int i = 0; i < items.length; i += 2)
+		{
+		ret = ret.assoc(items[i], items[i+1]);
+		}
+	return ret.persistent();
+}
+
 /**
  * This ctor captures/aliases the passed array, so do not modify later
  *
@@ -107,7 +117,7 @@ public int count(){
 }
 
 static int hash(Object key) {
-	return Util.hasheq(key) & 0x3ff;
+	return Util.hasheq(key);
 }
 
 static int index(long bitmap, long bitmask) {
@@ -115,11 +125,11 @@ static int index(long bitmap, long bitmask) {
 }
 
 static long bitmask1(int hash) {
-	return 1 << (hash & 0x3f);
+	return 1L << (hash & 0x3f);
 }
 
 static long bitmask2(int hash) {
-	return 1 << ((hash >>> 64) & 0x3f);
+	return 1L << ((hash >>> 6) & 0x3f);
 }
 
 public boolean containsKey(Object key){
@@ -141,7 +151,7 @@ public IPersistentMap assocEx(Object key, Object val) {
 		else // double conflict, convert to hashmap
 			return createHT(array).assocEx(key, val);
 	//didn't have key, grow
-	if(array.length > HASHTABLE_THRESHOLD)
+	if(array.length >= HASHTABLE_THRESHOLD)
 		return createHT(array).assocEx(key, val);
 	Object[] newArray = new Object[array.length + 2];
 	int i = index(bitmap, m);
@@ -177,7 +187,7 @@ public IPersistentMap assoc(Object key, Object val){
 		return create(newArray, bitmap);
 		}
 	//didn't have key, grow
-	if(array.length > HASHTABLE_THRESHOLD)
+	if(array.length >= HASHTABLE_THRESHOLD)
 		return createHT(array).assoc(key, val);
 	i = index(bitmap, m);
 	newArray = new Object[array.length + 2];
@@ -272,7 +282,7 @@ private long dissocMaskOf(Object key){
 		Object k2 = array[idx2];
 		if ((key == k2) || Util.equiv(key, k2)) return mask2;
 	}
-	if ((idx1 >= 0) || (Util.equiv(key, k1))) return mask1;
+	if ((idx1 >= 0) && (Util.equiv(key, k1))) return mask1;
 	return 0;
 }
 
@@ -413,7 +423,7 @@ static final class TransientBitmapMap extends ATransientMap {
 	}
 	
 	private int fastIndexOf(Object key) {
-		for(int i = 0; i < array.length; i += 2) {
+		for(int i = 0; i < len; i += 2) {
 			if (array[i] == key) return i;
 		}
 		return -1;
@@ -457,7 +467,7 @@ static final class TransientBitmapMap extends ATransientMap {
 			Object k2 = array[idx2];
 			if ((key == k2) || Util.equiv(key, k2)) return mask2;
 		}
-		if ((idx1 >= 0) || (Util.equiv(key, k1))) return mask1;
+		if ((idx1 >= 0) && (Util.equiv(key, k1))) return mask1;
 		return 0;
 	}
 
@@ -486,7 +496,7 @@ static final class TransientBitmapMap extends ATransientMap {
 			{
 			m = assocMaskOf(key);
 			if (m == 0) // double conflict, convert to hashmap
-				return PersistentHashMap.create(array).asTransient().assoc(key, val);
+				return PersistentHashMap.create(array, len).asTransient().assoc(key, val);
 			if((m & bitmap) != 0) //already have key
 				i = index(bitmap, m);
 			else
