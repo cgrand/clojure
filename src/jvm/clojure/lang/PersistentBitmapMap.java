@@ -266,41 +266,36 @@ private int indexOf(Object key){
 private long dissocMaskOf(Object key){
 	int h = hash(key);
 	long mask1 = bitmask1(h);
-	int idx1;
 	Object k1;
 	if ((bitmap & mask1) != 0) {
-		idx1 = index(bitmap, mask1);
-		k1 = array[idx1];
+		k1 = array[index(bitmap, mask1)];
 		if (k1 == key) return mask1;
 	} else {
-		idx1 = -1;
-		k1 = null;
+		k1 = this;
 	}
 	long mask2 = bitmask2(h);
+	Object k2;
 	if ((bitmap & mask2) != 0) {
-		int idx2 = index(bitmap, mask2);
-		Object k2 = array[idx2];
-		if ((key == k2) || Util.equiv(key, k2)) return mask2;
+		k2 = array[index(bitmap, mask2)];
+		if (key == k2) return mask2;
+	} else {
+		k2 = this;
 	}
-	if ((idx1 >= 0) && (Util.equiv(key, k1))) return mask1;
+	if ((k1 != this) && (Util.equiv(key, k1))) return mask1;
+	if ((k2 != this) && (Util.equiv(key, k2))) return mask2;
 	return 0;
 }
 
 private long assocMaskOf(Object key){
 	int h = hash(key);
-	long mask2 = bitmask2(h);
-	int i2 = -1;
-	if ((bitmap & mask2) != 0) {
-		i2 = index(bitmap, mask2);
-		if (Util.equiv(key, array[i2])) return mask2;
-	}
 	long mask1 = bitmask1(h);
-	if ((bitmap & mask1) != 0) {
-		int i1 = index(bitmap, mask1);
-		if (Util.equiv(key, array[i1])) return mask1;
-	} else
+	if (((bitmap & mask1) != 0) && Util.equiv(key, array[index(bitmap, mask1)])) 
 		return mask1;
-	if (i2 < 0) return mask2;
+	long mask2 = bitmask2(h);
+	if (((bitmap & mask2) != 0) && Util.equiv(key, array[index(bitmap, mask2)])) 
+		return mask2;
+	if ((bitmap & mask1) == 0) return mask1;
+	if ((bitmap & mask2) == 0) return mask2;
 	return 0;
 }
 
@@ -462,30 +457,31 @@ static final class TransientBitmapMap extends ATransientMap {
 			k1 = null;
 		}
 		long mask2 = bitmask2(h);
+		int idx2;
+		Object k2;
 		if ((bitmap & mask2) != 0) {
-			int idx2 = index(bitmap, mask2);
-			Object k2 = array[idx2];
-			if ((key == k2) || Util.equiv(key, k2)) return mask2;
+			idx2 = index(bitmap, mask2);
+			k2 = array[idx2];
+			if (key == k2) return mask2;
+		} else {
+			idx2 = -1;
+			k2 = null;
 		}
 		if ((idx1 >= 0) && (Util.equiv(key, k1))) return mask1;
+		if ((idx2 >= 0) && (Util.equiv(key, k2))) return mask1;
 		return 0;
 	}
 
 	private long assocMaskOf(Object key){
 		int h = hash(key);
-		long mask2 = bitmask2(h);
-		int i2 = -1;
-		if ((bitmap & mask2) != 0) {
-			i2 = index(bitmap, mask2);
-			if (Util.equiv(key, array[i2])) return mask2;
-		}
 		long mask1 = bitmask1(h);
-		if ((bitmap & mask1) != 0) {
-			int i1 = index(bitmap, mask1);
-			if (Util.equiv(key, array[i1])) return mask1;
-		} else
+		if (((bitmap & mask1) != 0) && Util.equiv(key, array[index(bitmap, mask1)])) 
 			return mask1;
-		if (i2 < 0) return mask2;
+		long mask2 = bitmask2(h);
+		if (((bitmap & mask2) != 0) && Util.equiv(key, array[index(bitmap, mask2)])) 
+			return mask2;
+		if ((bitmap & mask1) == 0) return mask1;
+		if ((bitmap & mask2) == 0) return mask2;
 		return 0;
 	}
 
