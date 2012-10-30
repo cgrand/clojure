@@ -26,7 +26,8 @@ import java.util.Map;
  * null keys and values are ok, but you won't be able to distinguish a null value via valAt - use contains/entryAt
  */
 
-public class PersistentBitmapMap extends APersistentMap implements IObj, IEditableCollection {
+public class PersistentBitmapMap extends APersistentMap implements IObj, IEditableCollection,
+																	IKeywordLookup {
 static final int HASHTABLE_THRESHOLD = 16;
 
 final Object[] array;
@@ -403,7 +404,7 @@ public ITransientMap asTransient(){
 	return new TransientBitmapMap(array, bitmap);
 }
 
-static final class TransientBitmapMap extends ATransientMap {
+static final class TransientBitmapMap extends ATransientMap implements IKeywordLookup {
 	int len;
 	long bitmap;
 	final Object[] array;
@@ -555,5 +556,82 @@ static final class TransientBitmapMap extends ATransientMap {
 			throw new IllegalAccessError("Transient used by non-owner thread");
 		throw new IllegalAccessError("Transient used after persistent! call");
 	}
+
+	public ILookupThunk getLookupThunk(final Keyword key) {
+		int h = hash(key);
+		final long mask1 = bitmask1(h);
+		final long mask2 = bitmask2(h);
+		
+		return new ILookupThunk() {
+			
+			public Object get(Object target) {
+				if (target instanceof TransientBitmapMap) {
+					TransientBitmapMap m = (TransientBitmapMap) target;
+					Object k1;
+					int idx1;
+					if ((m.bitmap & mask1) != 0) {
+						idx1 = index(m.bitmap, mask1);
+						k1 = m.array[idx1];
+						if (k1 == key) return m.array[idx1 + 1];
+					} else {
+						idx1 = -1;
+						k1 = null;
+					}
+					Object k2;
+					int idx2;
+					if ((m.bitmap & mask2) != 0) {
+						idx2 = index(m.bitmap, mask2);
+						k2 = m.array[idx2];
+						if (key == k2) return m.array[idx2 + 1];
+					} else {
+						idx2 = -1;
+						k2 = null;
+					}
+					if ((idx1 >= 0) && (Util.equiv(key, k1))) return m.array[idx1 + 1];
+					if ((idx2 >= 0) && (Util.equiv(key, k2))) return m.array[idx2 + 1];
+					return null;
+				}
+				return this;
+			}
+		};
+	}}
+
+public ILookupThunk getLookupThunk(final Keyword key) {
+	int h = hash(key);
+	final long mask1 = bitmask1(h);
+	final long mask2 = bitmask2(h);
+	
+	return new ILookupThunk() {
+		
+		public Object get(Object target) {
+			if (target instanceof PersistentBitmapMap) {
+				PersistentBitmapMap m = (PersistentBitmapMap) target;
+				Object k1;
+				int idx1;
+				if ((m.bitmap & mask1) != 0) {
+					idx1 = index(m.bitmap, mask1);
+					k1 = m.array[idx1];
+					if (k1 == key) return m.array[idx1 + 1];
+				} else {
+					idx1 = -1;
+					k1 = null;
+				}
+				Object k2;
+				int idx2;
+				if ((m.bitmap & mask2) != 0) {
+					idx2 = index(m.bitmap, mask2);
+					k2 = m.array[idx2];
+					if (key == k2) return m.array[idx2 + 1];
+				} else {
+					idx2 = -1;
+					k2 = null;
+				}
+				if ((idx1 >= 0) && (Util.equiv(key, k1))) return m.array[idx1 + 1];
+				if ((idx2 >= 0) && (Util.equiv(key, k2))) return m.array[idx2 + 1];
+				return null;
+			}
+			return this;
+		}
+	};
 }
 }
