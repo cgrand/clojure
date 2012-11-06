@@ -251,15 +251,15 @@ private int indexOf(Object key){
 	if (i >= 0) return i;
 
 	int h = hash(key);
-	long mask = bitmask1(h);
-	if ((bitmap & mask) != 0) {
-		i = index(bitmap, mask);
-		if (Util.equiv(key, array[i])) return i;
+	long mask1 = 1L << (h & 0x3f);
+	long mask2 = 1L << ((h >>> 6) & 0x3f);
+	if ((bitmap & mask1) != 0) {
+		int j = Long.bitCount(bitmap & --mask1) << 1;
+		if (j >= 0 && Util.equiv(array[j], key)) return j;
 	}
-	mask = bitmask2(h);
-	if ((bitmap & mask) != 0) {
-		i = index(bitmap, mask);
-		if (Util.equiv(key, array[i])) return i;
+	if ((bitmap & mask2) != 0) {
+		int j = Long.bitCount(bitmap & --mask2) << 1;
+		if (j >= 0 && Util.equiv(array[j], key)) return j;
 	}
 	return -1;
 }
@@ -282,18 +282,18 @@ private long dissocMaskOf(Object key){
 	} else {
 		k2 = this;
 	}
-	if ((k1 != this) && (Util.equiv(key, k1))) return mask1;
-	if ((k2 != this) && (Util.equiv(key, k2))) return mask2;
+	if ((k1 != this) && (Util.equiv(k1, key))) return mask1;
+	if ((k2 != this) && (Util.equiv(k2, key))) return mask2;
 	return 0;
 }
 
-private long assocMaskOf(Object key){
+public long assocMaskOf(Object key){
 	int h = hash(key);
 	long mask1 = bitmask1(h);
-	if (((bitmap & mask1) != 0) && Util.equiv(key, array[index(bitmap, mask1)])) 
+	if (((bitmap & mask1) != 0) && Util.equiv(array[index(bitmap, mask1)], key)) 
 		return mask1;
 	long mask2 = bitmask2(h);
-	if (((bitmap & mask2) != 0) && Util.equiv(key, array[index(bitmap, mask2)])) 
+	if (((bitmap & mask2) != 0) && Util.equiv(array[index(bitmap, mask2)], key)) 
 		return mask2;
 	if ((bitmap & mask1) == 0) return mask1;
 	if ((bitmap & mask2) == 0) return mask2;
@@ -434,12 +434,12 @@ static final class TransientBitmapMap extends ATransientMap implements IKeywordL
 		long mask = bitmask1(h);
 		if ((bitmap & mask) != 0) {
 			i = index(bitmap, mask);
-			if (Util.equiv(key, array[i])) return i;
+			if (Util.equiv(array[i], key)) return i;
 		}
 		mask = bitmask2(h);
 		if ((bitmap & mask) != 0) {
 			i = index(bitmap, mask);
-			if (Util.equiv(key, array[i])) return i;
+			if (Util.equiv(array[i], key)) return i;
 		}
 		return -1;
 	}
@@ -468,18 +468,18 @@ static final class TransientBitmapMap extends ATransientMap implements IKeywordL
 			idx2 = -1;
 			k2 = null;
 		}
-		if ((idx1 >= 0) && (Util.equiv(key, k1))) return mask1;
-		if ((idx2 >= 0) && (Util.equiv(key, k2))) return mask1;
+		if ((idx1 >= 0) && (Util.equiv(k1, key))) return mask1;
+		if ((idx2 >= 0) && (Util.equiv(k2, key))) return mask1;
 		return 0;
 	}
 
 	private long assocMaskOf(Object key){
 		int h = hash(key);
 		long mask1 = bitmask1(h);
-		if (((bitmap & mask1) != 0) && Util.equiv(key, array[index(bitmap, mask1)])) 
+		if (((bitmap & mask1) != 0) && Util.equiv(array[index(bitmap, mask1)], key)) 
 			return mask1;
 		long mask2 = bitmask2(h);
-		if (((bitmap & mask2) != 0) && Util.equiv(key, array[index(bitmap, mask2)])) 
+		if (((bitmap & mask2) != 0) && Util.equiv(array[index(bitmap, mask2)], key)) 
 			return mask2;
 		if ((bitmap & mask1) == 0) return mask1;
 		if ((bitmap & mask2) == 0) return mask2;
@@ -587,8 +587,8 @@ static final class TransientBitmapMap extends ATransientMap implements IKeywordL
 						idx2 = -1;
 						k2 = null;
 					}
-					if ((idx1 >= 0) && (Util.equiv(key, k1))) return m.array[idx1 + 1];
-					if ((idx2 >= 0) && (Util.equiv(key, k2))) return m.array[idx2 + 1];
+					if ((idx1 >= 0) && (Util.equiv(k1, key))) return m.array[idx1 + 1];
+					if ((idx2 >= 0) && (Util.equiv(k2, key))) return m.array[idx2 + 1];
 					return null;
 				}
 				return this;
