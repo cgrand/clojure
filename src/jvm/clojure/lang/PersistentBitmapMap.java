@@ -251,15 +251,15 @@ private int indexOf(Object key){
 	if (i >= 0) return i;
 
 	int h = hash(key);
-	long mask1 = 1L << (h & 0x3f);
-	long mask2 = 1L << ((h >>> 6) & 0x3f);
-	if ((bitmap & mask1) != 0) {
-		int j = Long.bitCount(bitmap & --mask1) << 1;
-		if (j >= 0 && Util.equiv(array[j], key)) return j;
+	long mask = bitmask1(h);
+	if ((bitmap & mask) != 0) {
+		i = index(bitmap, mask);
+		if (Util.equiv(array[i], key)) return i;
 	}
-	if ((bitmap & mask2) != 0) {
-		int j = Long.bitCount(bitmap & --mask2) << 1;
-		if (j >= 0 && Util.equiv(array[j], key)) return j;
+	mask = bitmask2(h);
+	if ((bitmap & mask) != 0) {
+		i = index(bitmap, mask);
+		if (Util.equiv(array[i], key)) return i;
 	}
 	return -1;
 }
