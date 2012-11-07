@@ -166,31 +166,22 @@ public IPersistentMap assocEx(Object key, Object val) {
 }
 
 public IPersistentMap assoc(Object key, Object val){
-	int i = fastIndexOf(key);
-	long m = 0;
-	if (i < 0) 
-		{
-		m = assocMaskOf(key);
-		if (m == 0) // double conflict, convert to hashmap
-			return createHT(array).assocEx(key, val);
-		if((m & bitmap) != 0) //already have key
-			i = index(bitmap, m);
-		else
-			i = -1;
-		}
 	Object[] newArray;
-	if(i >= 0) //already have key, same-sized replacement
-		{
+	long m = assocMaskOf(key);
+	if (m == 0) // double conflict, convert to hashmap
+		return createHT(array).assocEx(key, val);
+	if((m & bitmap) != 0) {//already have key
+		int i = index(bitmap, m);
 		if(array[i + 1] == val) //no change, no op
 			return this;
 		newArray = array.clone();
 		newArray[i + 1] = val;
 		return create(newArray, bitmap);
-		}
+	}
 	//didn't have key, grow
 	if(array.length >= HASHTABLE_THRESHOLD)
 		return createHT(array).assoc(key, val);
-	i = index(bitmap, m);
+	int i = index(bitmap, m);
 	newArray = new Object[array.length + 2];
 	if(array.length > 0) {
 		System.arraycopy(array, 0, newArray, 0, i);
@@ -238,18 +229,8 @@ public int capacity(){
 	return count();
 }
 
-private int fastIndexOf(Object key) {
-	for(int i = 0; i < array.length; i += 2) {
-		if (array[i] == key) return i;
-	}
-	return -1;
-}
-
 private int indexOf(Object key){
-	// first try a linear scan to find the identical key
-	int i = fastIndexOf(key);
-	if (i >= 0) return i;
-
+	int i;
 	int h = hash(key);
 	long mask = bitmask1(h);
 	if ((bitmap & mask) != 0) {
@@ -418,18 +399,8 @@ static final class TransientBitmapMap extends ATransientMap implements IKeywordL
 		this.bitmap = bitmap;
 	}
 	
-	private int fastIndexOf(Object key) {
-		for(int i = 0; i < len; i += 2) {
-			if (array[i] == key) return i;
-		}
-		return -1;
-	}
-
 	private int indexOf(Object key){
-		// first try a linear scan to find the identical key
-		int i = fastIndexOf(key);
-		if (i >= 0) return i;
-
+		int i;
 		int h = hash(key);
 		long mask = bitmask1(h);
 		if ((bitmap & mask) != 0) {
@@ -487,28 +458,19 @@ static final class TransientBitmapMap extends ATransientMap implements IKeywordL
 	}
 
 	ITransientMap doAssoc(Object key, Object val){
-		int i = fastIndexOf(key);
-		long m = 0;
-		if (i < 0) 
-			{
-			m = assocMaskOf(key);
-			if (m == 0) // double conflict, convert to hashmap
-				return PersistentHashMap.create(array, len).asTransient().assoc(key, val);
-			if((m & bitmap) != 0) //already have key
-				i = index(bitmap, m);
-			else
-				i = -1;
-			}
-		if(i >= 0) //already have key, same-sized replacement
-			{
+		long m = assocMaskOf(key);
+		if (m == 0) // double conflict, convert to hashmap
+			return PersistentHashMap.create(array, len).asTransient().assoc(key, val);
+		if((m & bitmap) != 0) { //already have key, same-sized replacement
+			int i = index(bitmap, m);
 			if(array[i + 1] != val) //no change, no op
 				array[i + 1] = val;
 			return this;
-			}
+		}
 		//didn't have key, grow
 		if(len >= array.length)
 			return PersistentHashMap.create(array).asTransient().assoc(key, val);
-		i = index(bitmap, m);
+		int i = index(bitmap, m);
 		System.arraycopy(array, i, array, i+2, len - i);
 		array[i] = key;
 		array[i + 1] = val;
