@@ -44,6 +44,7 @@ static final Symbol LET = Symbol.intern("let*");
 static final Symbol LETFN = Symbol.intern("letfn*");
 static final Symbol DO = Symbol.intern("do");
 static final Symbol FN = Symbol.intern("fn*");
+static final Symbol FNONCE = (Symbol) Symbol.intern("fn*").withMeta(RT.map(Keyword.intern(null, "once"), RT.T));
 static final Symbol QUOTE = Symbol.intern("quote");
 static final Symbol THE_VAR = Symbol.intern("var");
 static final Symbol DOT = Symbol.intern(".");
@@ -300,6 +301,9 @@ static final public Var CLEAR_SITES = Var.create(null).setDynamic();
 	EVAL
 }
 
+private class Recur {};
+static final public Class RECUR_CLASS = Recur.class;
+    
 interface Expr{
 	Object eval() ;
 
@@ -2120,7 +2124,7 @@ public static class TryExpr implements Expr{
 			ISeq form = (ISeq) frm;
 //			if(context == C.EVAL || context == C.EXPRESSION)
 			if(context != C.RETURN)
-				return analyze(context, RT.list(RT.list(FN, PersistentVector.EMPTY, form)));
+				return analyze(context, RT.list(RT.list(FNONCE, PersistentVector.EMPTY, form)));
 
 			//(try try-expr* catch-expr* finally-expr?)
 			//catch-expr: (catch class sym expr*)
@@ -2296,7 +2300,7 @@ static class ThrowExpr extends UntypedExpr{
 	static class Parser implements IParser{
 		public Expr parse(C context, Object form) {
 			if(context == C.EVAL)
-				return analyze(context, RT.list(RT.list(FN, PersistentVector.EMPTY, form)));
+				return analyze(context, RT.list(RT.list(FNONCE, PersistentVector.EMPTY, form)));
 			return new ThrowExpr(analyze(C.EXPRESSION, RT.second(form)));
 		}
 	}
@@ -2618,6 +2622,8 @@ public static class IfExpr implements Expr, MaybePrimitiveExpr{
 		       && elseExpr.hasJavaClass()
 		       &&
 		       (thenExpr.getJavaClass() == elseExpr.getJavaClass()
+		        || thenExpr.getJavaClass() == RECUR_CLASS
+				|| elseExpr.getJavaClass() == RECUR_CLASS		        
 		        || (thenExpr.getJavaClass() == null && !elseExpr.getJavaClass().isPrimitive())
 		        || (elseExpr.getJavaClass() == null && !thenExpr.getJavaClass().isPrimitive()));
 	}
@@ -2627,7 +2633,9 @@ public static class IfExpr implements Expr, MaybePrimitiveExpr{
 			{
 			return thenExpr instanceof MaybePrimitiveExpr
 			       && elseExpr instanceof MaybePrimitiveExpr
-			       && thenExpr.getJavaClass() == elseExpr.getJavaClass()
+			       && (thenExpr.getJavaClass() == elseExpr.getJavaClass()
+			           || thenExpr.getJavaClass() == RECUR_CLASS
+			           || elseExpr.getJavaClass() == RECUR_CLASS)
 			       && ((MaybePrimitiveExpr)thenExpr).canEmitPrimitive()
 				   && ((MaybePrimitiveExpr)elseExpr).canEmitPrimitive();
 			}
@@ -2639,7 +2647,7 @@ public static class IfExpr implements Expr, MaybePrimitiveExpr{
 
 	public Class getJavaClass() {
 		Class thenClass = thenExpr.getJavaClass();
-		if(thenClass != null)
+		if(thenClass != null && thenClass != RECUR_CLASS)
 			return thenClass;
 		return elseExpr.getJavaClass();
 	}
@@ -5798,7 +5806,7 @@ public static class LetFnExpr implements Expr{
 			ISeq body = RT.next(RT.next(form));
 
 			if(context == C.EVAL)
-				return analyze(context, RT.list(RT.list(FN, PersistentVector.EMPTY, form)));
+				return analyze(context, RT.list(RT.list(FNONCE, PersistentVector.EMPTY, form)));
 
 			IPersistentMap dynamicBindings = RT.map(LOCAL_ENV, LOCAL_ENV.deref(),
 			                                        NEXT_LOCAL_NUM, NEXT_LOCAL_NUM.deref());
@@ -5927,7 +5935,7 @@ public static class LetExpr implements Expr, MaybePrimitiveExpr{
 
 			if(context == C.EVAL
 			   || (context == C.EXPRESSION && isLoop))
-				return analyze(context, RT.list(RT.list(FN, PersistentVector.EMPTY, form)));
+				return analyze(context, RT.list(RT.list(FNONCE, PersistentVector.EMPTY, form)));
 
 			ObjMethod method = (ObjMethod) METHOD.deref();
 			IPersistentMap backupMethodLocals = method.locals;
@@ -6111,7 +6119,7 @@ public static class LetExpr implements Expr, MaybePrimitiveExpr{
 
 }
 
-public static class RecurExpr implements Expr{
+public static class RecurExpr implements Expr, MaybePrimitiveExpr{
 	public final IPersistentVector args;
 	public final IPersistentVector loopLocals;
 	final int line;
@@ -6216,7 +6224,7 @@ public static class RecurExpr implements Expr{
 	}
 
 	public Class getJavaClass() {
-		return null;
+		return RECUR_CLASS;
 	}
 
 	static class Parser implements IParser{
@@ -6279,6 +6287,14 @@ public static class RecurExpr implements Expr{
 				}
 			return new RecurExpr(loopLocals, args, line, column, source);
 		}
+	}
+
+	public boolean canEmitPrimitive() {
+		return true;
+	}
+
+	public void emitUnboxed(C context, ObjExpr objx, GeneratorAdapter gen) {
+		emit(context, objx, gen);
 	}
 }
 
@@ -8351,7 +8367,7 @@ public static class CaseExpr implements Expr, MaybePrimitiveExpr{
 		public Expr parse(C context, Object frm) {
 			ISeq form = (ISeq) frm;
 			if(context == C.EVAL)
-				return analyze(context, RT.list(RT.list(FN, PersistentVector.EMPTY, form)));
+				return analyze(context, RT.list(RT.list(FNONCE, PersistentVector.EMPTY, form)));
 			PersistentVector args = PersistentVector.create(form.next());
 
 			Object exprForm = args.nth(0);
