@@ -192,11 +192,11 @@ public Object fold(long n, final IFn combinef, final IFn reducef,
 	//we are ignoring n for now
 	Callable top = new Callable(){
 		public Object call() throws Exception{
-			Object ret = combinef.invoke();
+			Object ret = combinef.invoke(combinef.invoke());
 			if(root != null)
 				ret = combinef.invoke(ret, root.fold(combinef,reducef,fjtask,fjfork,fjjoin));
 			return hasNull?
-			       combinef.invoke(ret,reducef.invoke(combinef.invoke(),null,nullValue))
+			       combinef.invoke(ret,combinef.invoke(reducef.invoke(combinef.invoke()),null,nullValue))
 			       :ret;
 		}
 	};
@@ -692,7 +692,7 @@ final static class BitmapIndexedNode implements INode{
     }
 
 	public Object fold(IFn combinef, IFn reducef, IFn fjtask, IFn fjfork, IFn fjjoin){
-		return NodeSeq.kvreduce(array, reducef, combinef.invoke());
+		return combinef.invoke(NodeSeq.kvreduce(array, reducef, combinef.invoke()));
 	}
 
 	private BitmapIndexedNode ensureEditable(AtomicReference<Thread> edit){
@@ -884,7 +884,7 @@ final static class HashCollisionNode implements INode{
     }
 
 	public Object fold(IFn combinef, IFn reducef, IFn fjtask, IFn fjfork, IFn fjjoin){
-		return NodeSeq.kvreduce(array, reducef, combinef.invoke());
+		return combinef.invoke(NodeSeq.kvreduce(array, reducef, combinef.invoke()));
 	}
 
 	public int findIndex(Object key){

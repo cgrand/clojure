@@ -317,17 +317,23 @@
   constructor. op must be associative and ctor called with no args
   must return an identity value for it."
   {:added "1.5"}
-  [op ctor]
-  (fn m
-    ([] (ctor))
-    ([a b] (op a b))))
+  ([op ctor]
+    (fn m
+      ([] (ctor))
+      ([a] a)
+      ([a b] (op a b))))
+  ([op ctor cleanup]
+    (fn m
+      ([] (ctor))
+      ([a] (cleanup a))
+      ([a b] (op a b)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; fold impls ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn- foldvec
   [v n combinef reducef]
   (cond
-   (empty? v) (combinef)
-   (<= (count v) n) (reduce reducef (combinef) v)
+   (empty? v) (combinef (combinef))
+   (<= (count v) n) (combinef (reduce reducef (combinef) v))
    :else
    (let [split (quot (count v) 2)
          v1 (subvec v 0 split)
@@ -343,13 +349,13 @@
  nil
  (coll-fold
   [coll n combinef reducef]
-  (combinef))
+  (combinef (combinef)))
 
  Object
  (coll-fold
   [coll n combinef reducef]
   ;;can't fold, single reduce
-  (reduce reducef (combinef) coll))
+  (combinef (reduce reducef (combinef) coll)))
 
  clojure.lang.IPersistentVector
  (coll-fold
