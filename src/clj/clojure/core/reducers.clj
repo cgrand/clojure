@@ -107,9 +107,9 @@
      (reify
       clojure.core.protocols/CollReduce
       (coll-reduce [this f1]
-                   (clojure.core.protocols/coll-reduce this f1 (f1)))
+                   (reduce f1 (f1) this))
       (coll-reduce [_ f1 init]
-                   (clojure.core.protocols/coll-reduce coll (xf f1) init)))))
+                   (reduce (xf f1) init coll)))))
 
 (defn folder
   "Given a foldable collection, and a transformation function xf,
@@ -121,9 +121,9 @@
      (reify
       clojure.core.protocols/CollReduce
       (coll-reduce [_ f1]
-                   (clojure.core.protocols/coll-reduce coll (xf f1) (f1)))
+                   (reduce (xf f1) (f1) coll))
       (coll-reduce [_ f1 init]
-                   (clojure.core.protocols/coll-reduce coll (xf f1) init))
+                   (reduce (xf f1) init coll))
 
       CollFold
       (coll-fold [_ n combinef reducef]
@@ -360,3 +360,41 @@
  (coll-fold
   [m n combinef reducef]
   (.fold m n combinef reducef fjinvoke fjtask fjfork fjjoin)))
+
+(defmacro for
+  "Reducer comprehension, behaves like \"for\" but yields a reducible collection.
+   Leverages kv-reduce when destructuring and iterating over a map."
+  {:added "1.0"}
+  [seq-exprs body-expr]
+  (letfn [(emit-fn [form] 
+            (fn [sub-expr [bind expr & mod-pairs]]
+              (let [foldable (not-any? (comp #{:while} first) mod-pairs)
+                    kv-able (and (vector? bind) (not-any? #{:as} bind)
+                              (every? #(and (symbol? %) (not= % '&)) (take 2 bind)))
+                    [kv-args kv-bind] 
+                    (if kv-able
+                      [(take 2 (concat bind (repeat `_#)))
+                       (if (< 2 (count bind)) 
+                         [(subvec bind 2) nil]
+                         [])]
+                      `[[k# v#] [~bind (clojure.lang.MapEntry. k# v#)]])
+                    combiner (if foldable `folder `reducer)
+                    f (gensym "f__")
+                    ret (gensym "ret__")
+                    body (emit-comprehension-mod mod-pairs (form f ret sub-expr)
+                           :skip ret
+                           :stop `(reduced ~ret))]
+                `(~combiner ~expr
+                   (fn [~f]
+                     (fn
+                       ([] (~f))
+                       ([~ret ~bind] ~body)
+                       ([~ret ~@kv-args] (let ~kv-bind ~body))))))))]
+    (emit-comprehension &form
+      {:emit-other (emit-fn (partial list `reduce)) :emit-inner (emit-fn list)}
+      seq-exprs body-expr)))
+
+(defmacro doseq 
+  "doseq but based on reducers, leverages kv-reduce when iterating on maps."
+  [bindings & body]
+ `(reduce (constantly nil) (for ~bindings (do ~@body))))
