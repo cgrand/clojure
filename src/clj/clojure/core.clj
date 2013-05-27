@@ -3085,7 +3085,7 @@
         other-groups (rseq (pop groups))]
     (reduce1 emit-other (emit-inner body-expr inner-group) other-groups)))
 
-(defn ^:private do-mod [mod-pairs cont & {:keys [skip stop]}]
+(defn emit-comprehension-mod [mod-pairs cont & {:keys [skip stop]}]
   (let [err (fn [& msg] (throw (IllegalArgumentException. ^String (apply str msg))))]
     (reduce1 
       (fn [cont [k v]]
@@ -3119,7 +3119,7 @@
                      (when (loop [~gi (int 0)]
                              (if (< ~gi size#)
                                (let [~bind (.nth c# ~gi)]
-                                    ~(do-mod mod-pairs
+                                    ~(emit-comprehension-mod mod-pairs
                                        `(do ~body-expr
                                           (recur (unchecked-inc ~gi))) 
                                        :skip `(recur (unchecked-inc ~gi))
@@ -3127,7 +3127,7 @@
                                true))
                        (recur (chunk-rest ~gxs))))
                    (let [~bind (first ~gxs)]
-                     ~(do-mod mod-pairs
+                     ~(emit-comprehension-mod mod-pairs
                         `(do ~body-expr
                            (recur (rest ~gxs)))
                         :skip `(recur (rest ~gxs))
@@ -4202,7 +4202,7 @@
                 (lazy-seq
                   (loop [~gxs ~gxs]
                     (when-first [~bind ~gxs]
-                      ~(do-mod mod-pairs
+                      ~(emit-comprehension-mod mod-pairs
                          `(let [fs# (seq ~sub-expr)]
                             (if fs#
                               (concat fs# (~giter (rest ~gxs)))
@@ -4228,7 +4228,7 @@
                           (if (loop [~gi (int 0)]
                                (if (< ~gi size#)
                                  (let [~bind (.nth c# ~gi)]
-                                   ~(do-mod mod-pairs
+                                   ~(emit-comprehension-mod mod-pairs
                                       `(do (chunk-append ~gb ~body-expr)
                                          (recur (unchecked-inc ~gi))) 
                                       :skip `(recur (unchecked-inc ~gi))
@@ -4239,7 +4239,7 @@
                              (~giter (chunk-rest ~gxs)))
                             (chunk-cons (chunk ~gb) nil)))
                         (let [~bind (first ~gxs)]
-                          ~(do-mod mod-pairs
+                          ~(emit-comprehension-mod mod-pairs
                              `(cons ~body-expr
                                 (~giter (rest ~gxs)))
                              :skip `(recur (rest ~gxs))
