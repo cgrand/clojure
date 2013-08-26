@@ -21,6 +21,7 @@ public class PersistentVector extends APersistentVector implements IObj, IEditab
 
 public static class Node implements Serializable {
 	transient public final AtomicReference<Thread> edit;
+	int _parthasheq = -1;
 	public final Object[] array;
 
 	public Node(AtomicReference<Thread> edit, Object[] array){
@@ -31,6 +32,32 @@ public static class Node implements Serializable {
 	Node(AtomicReference<Thread> edit){
 		this.edit = edit;
 		this.array = new Object[32];
+	}
+	
+	int parthasheq(int level) {
+		if (_parthasheq == -1) {
+			int hash = 0;
+			if (level == 0) {
+				for(Object item: array)
+					hash = 31*hash + Util.hasheq(item);
+			} else {
+				int multiplier;
+				switch(level) {
+				case 5: multiplier = 2111290369; break;
+				case 10: multiplier = -1174962175; break;
+				case 15: multiplier = 1055916033; break;
+				case 20: multiplier = -570425343; break;
+				case 25: multiplier = -1073741823; break;
+				default: multiplier = 1; // is case 30
+				}
+				for(Object node: array) {
+					if (node == null) break;
+					hash = multiplier*hash + ((Node) node).parthasheq(level-5);
+				}				
+			}
+			_parthasheq = hash;
+		}
+		return _parthasheq;
 	}
 }
 
@@ -86,6 +113,23 @@ PersistentVector(IPersistentMap meta, int cnt, int shift, Node root, Object[] ta
 
 public TransientVector asTransient(){
 	return new TransientVector(this);
+}
+
+public int hasheq() {
+	if (_hasheq == -1) {
+		int hash = root.parthasheq(shift);
+		final int n = cnt - tailoff();
+		for(int i = 0; i < n; i++)
+			hash = 31*hash + Util.hasheq(tail[i]);
+		int m = 31;
+		int pow = 1;
+		for(int exp = cnt; exp > 0; exp >>= 1) {
+			if ((exp & 1) != 0) pow *= m;
+			m = m * m;
+		}
+		_hasheq = hash + pow;
+	}
+	return _hasheq;
 }
 
 final int tailoff(){

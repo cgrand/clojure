@@ -216,6 +216,16 @@ public IPersistentCollection empty(){
 	return EMPTY.withMeta(meta());	
 }
 
+public int hasheq(){
+	if(_hasheq == -1)
+		{
+		this._hasheq = (root != null ? root.hasheq() : 0)
+				+ (hasNull ? Util.hasheq(nullValue) : 0);
+		}
+	return _hasheq;
+}
+
+
 static int mask(int hash, int shift){
 	//return ((hash << shift) >>> 27);// & 0x01f;
 	return (hash >>> shift) & 0x01f;
@@ -340,12 +350,15 @@ static interface INode extends Serializable {
     public Object kvreduce(IFn f, Object init);
 
 	Object fold(IFn combinef, IFn reducef, IFn fjtask, IFn fjfork, IFn fjjoin);
+	
+	int hasheq();
 }
 
 final static class ArrayNode implements INode{
 	int count;
 	final INode[] array;
 	final AtomicReference<Thread> edit;
+	int _hasheq = -1;
 
 	ArrayNode(AtomicReference<Thread> edit, int count, INode[] array){
 		this.array = array;
@@ -522,6 +535,16 @@ final static class ArrayNode implements INode{
 		return editAndSet(edit, idx, n);
 	}
 	
+	public int hasheq() {
+		if (_hasheq == -1) {
+			int hash = 0;
+			for(INode node: array)
+				hash += node != null ? node.hasheq() : 0;
+			_hasheq = hash;
+		}
+		return _hasheq;
+	}
+	
 	static class Seq extends ASeq {
 		final INode[] nodes;
 		final int i;
@@ -568,6 +591,7 @@ final static class ArrayNode implements INode{
 final static class BitmapIndexedNode implements INode{
 	static final BitmapIndexedNode EMPTY = new BitmapIndexedNode(null, 0, new Object[0]);
 	
+	int _hasheq = -1;
 	int bitmap;
 	Object[] array;
 	final AtomicReference<Thread> edit;
@@ -812,10 +836,28 @@ final static class BitmapIndexedNode implements INode{
 		}
 		return this;
 	}
+	
+	public int hasheq() {
+		if (_hasheq == -1) {
+			int hash = 0;
+			for(int i = 0; i < array.length; i += 2) {
+				Object keyOrNull = array[i];
+				Object valOrNode = array[i+1];
+				if (keyOrNull == null) {
+					hash += valOrNode != null ? ((INode) valOrNode).hasheq() : 0;
+				} else {
+					hash += Util.hasheq(keyOrNull) ^ Util.hasheq(valOrNode);
+				}
+			}
+			_hasheq = hash;
+		}
+		return _hasheq;
+	}
 }
 
 final static class HashCollisionNode implements INode{
 
+	int _hasheq = -1;
 	final int hash;
 	int count;
 	Object[] array;
@@ -875,6 +917,16 @@ final static class HashCollisionNode implements INode{
 		return notFound;
 	}
 
+	public int hasheq() {
+		if (_hasheq == -1) {
+			int hash = 0;
+			for(int i = 1; i < array.length; i += 2)
+				hash += this.hash ^ Util.hasheq(array[i]);
+			_hasheq = hash;
+		}
+		return _hasheq;
+	}
+	
 	public ISeq nodeSeq(){
 		return NodeSeq.create(array);
 	}
