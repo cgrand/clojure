@@ -42,6 +42,10 @@ public static class Node implements Serializable {
 					hash = 31*hash + Util.hasheq(item);
 			} else {
 				int multiplier;
+//				=> (take 7 (iterate 
+//					     #(reduce unchecked-multiply-int (repeat 32 %))
+//					     31))
+//					(31 2111290369 -1174962175 1055916033 -570425343 -1073741823 1)
 				switch(level) {
 				case 5: multiplier = 2111290369; break;
 				case 10: multiplier = -1174962175; break;
