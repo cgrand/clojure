@@ -56,7 +56,10 @@ static IPersistentMap ops = RT.map(
  "public static long clojure.lang.Numbers.unchecked_inc(long)", oa(LCONST_1, LADD),
  "public static double clojure.lang.Numbers.unchecked_dec(double)", oa(DCONST_1, DSUB),
  "public static long clojure.lang.Numbers.unchecked_dec(long)", oa(LCONST_1, LSUB),
-
+ "public static float clojure.lang.Numbers.float_add(float,float)", FADD,
+ "public static float clojure.lang.Numbers.float_subtract(float,float)", FSUB,
+ "public static float clojure.lang.Numbers.float_multiply(float,float)", FMUL,
+ "public static float clojure.lang.Numbers.float_divide(float,float)", FDIV,
 
   "public static short clojure.lang.RT.aget(short[],int)", SALOAD,
   "public static float clojure.lang.RT.aget(float[],int)", FALOAD,

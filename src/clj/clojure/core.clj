@@ -1196,6 +1196,30 @@
    :added "1.0"}
   [x y] (. clojure.lang.Numbers (unchecked_int_remainder x y)))
 
+(defn add-float
+  "Returns the sum of x and y, both float."
+  {:inline (fn [x y] `(. clojure.lang.Numbers (float_add ~x ~y)))
+   :added "1.6"}
+  [x y] (. clojure.lang.Numbers (float_add x y)))
+
+(defn subtract-float
+  "Returns the difference of x and y, both float."
+  {:inline (fn [x y] `(. clojure.lang.Numbers (float_subtract ~x ~y)))
+   :added "1.6"}
+  [x y] (. clojure.lang.Numbers (float_subtract x y)))
+
+(defn multiply-float
+  "Returns the product of x and y, both float."
+  {:inline (fn [x y] `(. clojure.lang.Numbers (float_multiply ~x ~y)))
+   :added "1.6"}
+  [x y] (. clojure.lang.Numbers (float_multiply x y)))
+
+(defn divide-float
+  "Returns the division of x and y, both float."
+  {:inline (fn [x y] `(. clojure.lang.Numbers (float_divide ~x ~y)))
+   :added "1.6"}
+  [x y] (. clojure.lang.Numbers (float_divide x y)))
+
 (defn pos?
   "Returns true if num is greater than zero, else false"
   {

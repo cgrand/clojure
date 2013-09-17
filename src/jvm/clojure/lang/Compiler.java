@@ -1360,6 +1360,30 @@ static abstract class MethodExpr extends HostExpr{
 					pe.emitUnboxed(C.EXPRESSION, objx, gen);
 					gen.visitInsn(D2F);
 					}
+				else if(primc == int.class && parameterTypes[i] == double.class)
+					{
+					final MaybePrimitiveExpr pe = (MaybePrimitiveExpr) e;
+					pe.emitUnboxed(C.EXPRESSION, objx, gen);
+					gen.visitInsn(I2D);
+					}
+				else if(primc == int.class && parameterTypes[i] == float.class)
+					{
+					final MaybePrimitiveExpr pe = (MaybePrimitiveExpr) e;
+					pe.emitUnboxed(C.EXPRESSION, objx, gen);
+					gen.visitInsn(I2F);
+					}
+				else if(primc == long.class && parameterTypes[i] == double.class)
+					{
+					final MaybePrimitiveExpr pe = (MaybePrimitiveExpr) e;
+					pe.emitUnboxed(C.EXPRESSION, objx, gen);
+					gen.visitInsn(L2D);
+					}
+				else if(primc == long.class && parameterTypes[i] == float.class)
+					{
+					final MaybePrimitiveExpr pe = (MaybePrimitiveExpr) e;
+					pe.emitUnboxed(C.EXPRESSION, objx, gen);
+					gen.visitInsn(L2F);
+					}
 				else
 					{
 					e.emit(C.EXPRESSION, objx, gen);

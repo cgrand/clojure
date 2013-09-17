@@ -4011,4 +4011,20 @@ static public Object min(Object x, Object y){
 	}
 }
 
+static public float float_add(float x, float y) {
+	return x + y;
+}
+
+static public float float_subtract(float x, float y) {
+	return x - y;
+}
+
+static public float float_multiply(float x, float y) {
+	return x * y;
+}
+
+static public float float_divide(float x, float y) {
+	return x / y;
+}
+
 }
