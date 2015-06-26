@@ -399,32 +399,6 @@ static interface INode extends Serializable {
     Iterator iterator(IFn f);
 }
 
-static abstract class NodeUpdater {
-    int countDelta = 0;
-    
-    abstract ArrayNode editable(ArrayNode arrayNode);
-
-    abstract BitmapIndexedNode editable(BitmapIndexedNode node);
-
-    abstract BitmapIndexedNode allocSlot(BitmapIndexedNode node, int i, int n);
-
-    abstract BitmapIndexedNode freeSlot(BitmapIndexedNode node, int i, int bit);
-    
-    abstract HashCollisionNode editable(HashCollisionNode hashCollisionNode);
-
-    abstract HashCollisionNode allocSlot(HashCollisionNode hashCollisionNode);
-
-    abstract HashCollisionNode freeSlot(HashCollisionNode node, int idx);
-
-    abstract HashCollisionNode createCollision(int hash, Object key1, Object val1,
-            Object key2, Object val2);
-
-    abstract BitmapIndexedNode createBitmap(int bitmap, Object key1, Object val1, Object key2,
-            Object val2);
-
-    abstract BitmapIndexedNode createBitmap(int bitmap, Object key, Object val);
-}
-
 final static class ArrayNode implements INode{
 	int count;
 	final INode[] array;
@@ -817,14 +791,14 @@ final static class BitmapIndexedNode implements INode{
 			if (n != null)
 				return editAndSet(updater, 2*idx+1, n); 
 	        if (bitmap == bit) return null;
-			BitmapIndexedNode editable = updater.freeSlot(this, idx, bit);
+			BitmapIndexedNode editable = updater.freeSlot(this, idx);
 			editable.bitmap ^= bit;
             return editable; 
 		}
 		if(Util.equiv(key, keyOrNull)) {
             updater.countDelta--;
             if (bitmap == bit) return null;
-            BitmapIndexedNode editable = updater.freeSlot(this, idx, bit);
+            BitmapIndexedNode editable = updater.freeSlot(this, idx);
             editable.bitmap ^= bit;
             return editable; 
 		}
@@ -1212,60 +1186,126 @@ static final class NodeSeq extends ASeq {
 	}
 }
 
-static final class PersistentUpdater extends NodeUpdater {
-    public ArrayNode editable(ArrayNode node) {
-        return new ArrayNode(null, node.count, node.array.clone());
+static abstract class NodeUpdater {
+    int countDelta = 0;
+    
+    abstract ArrayNode editable(ArrayNode arrayNode);
+
+    abstract BitmapIndexedNode editable(BitmapIndexedNode node);
+
+    abstract BitmapIndexedNode allocSlot(BitmapIndexedNode node, int i, int n);
+
+    abstract BitmapIndexedNode freeSlot(BitmapIndexedNode node, int i);
+    
+    abstract HashCollisionNode editable(HashCollisionNode hashCollisionNode);
+
+    abstract HashCollisionNode allocSlot(HashCollisionNode hashCollisionNode);
+
+    abstract HashCollisionNode freeSlot(HashCollisionNode node, int idx);
+
+    abstract HashCollisionNode createCollision(int hash, Object key1, Object val1,
+            Object key2, Object val2);
+
+    abstract BitmapIndexedNode createBitmap(int bitmap, Object key1, Object val1, Object key2,
+            Object val2);
+
+    abstract BitmapIndexedNode createBitmap(int bitmap, Object key, Object val);
+
+    static ArrayNode editable(AtomicReference<Thread> edit, ArrayNode node) {
+        return new ArrayNode(edit, node.count, node.array.clone());
     }
 
-    public BitmapIndexedNode editable(BitmapIndexedNode node) {
-        return new BitmapIndexedNode(null, node.bitmap, node.array.clone());
+    static BitmapIndexedNode editable(AtomicReference<Thread> edit, BitmapIndexedNode node) {
+        return new BitmapIndexedNode(edit, node.bitmap, node.array.clone());
     }
 
-    public BitmapIndexedNode allocSlot(BitmapIndexedNode node, int i, int n) {
+    static BitmapIndexedNode allocSlot(AtomicReference<Thread> edit, BitmapIndexedNode node, int i, int n) {
         Object[] newArray = new Object[2*(n+1)];
         System.arraycopy(node.array, 0, newArray, 0, 2*i);
         System.arraycopy(node.array, 2*i, newArray, 2*(i+1), 2*(n - i));
-        return new BitmapIndexedNode(null, node.bitmap, newArray);
+        return new BitmapIndexedNode(edit, node.bitmap, newArray);
     }
 
-    public BitmapIndexedNode freeSlot(BitmapIndexedNode node, int i, int bit) {
+    static BitmapIndexedNode freeSlot(AtomicReference<Thread> edit, BitmapIndexedNode node, int i) {
         int n = node.array.length - 2;
         Object[] newArray = new Object[n];
         System.arraycopy(node.array, 0, newArray, 0, 2*i);
         System.arraycopy(node.array, 2*(i+1), newArray, 2*i, n - 2*i);
-        return new BitmapIndexedNode(null, node.bitmap, newArray);
+        return new BitmapIndexedNode(edit, node.bitmap, newArray);
     }
 
-    public HashCollisionNode createCollision(int hash, Object key1,
-            Object val1, Object key2, Object val2) {
-        return new HashCollisionNode(null, hash, 2, new Object[] { key1, val1, key2, val2 });
+    static HashCollisionNode createCollision(AtomicReference<Thread> edit, int hash, Object key1, Object val1, Object key2, Object val2) {
+        return new HashCollisionNode(edit, hash, 2, new Object[] { key1, val1, key2, val2 });
     }
 
-    public BitmapIndexedNode createBitmap(int bitmap, Object key1, Object val1,
+    static BitmapIndexedNode createBitmap(AtomicReference<Thread> edit, int bitmap, Object key1, Object val1,
             Object key2, Object val2) {
-        return new BitmapIndexedNode(null, bitmap, new Object[] { key1, val1, key2, val2 });
+        return new BitmapIndexedNode(edit, bitmap, new Object[] { key1, val1, key2, val2 });
     }
 
-    public HashCollisionNode editable(HashCollisionNode node) {
-        return new HashCollisionNode(null, node.hash, node.count, node.array.clone());
+    static HashCollisionNode editable(AtomicReference<Thread> edit, HashCollisionNode node) {
+        return new HashCollisionNode(edit, node.hash, node.count, node.array.clone());
     }
 
-    public HashCollisionNode allocSlot(HashCollisionNode node) {
+    static HashCollisionNode allocSlot(AtomicReference<Thread> edit, HashCollisionNode node) {
         Object[] newArray = new Object[2*(node.count+1)];
         System.arraycopy(node.array, 0, newArray, 0, 2*node.count);
-        return new HashCollisionNode(null, node.hash, node.count, newArray);
+        return new HashCollisionNode(edit, node.hash, node.count, newArray);
     }
     
-    public HashCollisionNode freeSlot(HashCollisionNode node, int idx) {
+    static HashCollisionNode freeSlot(AtomicReference<Thread> edit, HashCollisionNode node, int idx) {
         int count = node.count;
         Object[] newArray = new Object[2*count-1];
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx+2, newArray, idx, newArray.length - idx - 2);
-        return new HashCollisionNode(null, node.hash, count, newArray);
+        return new HashCollisionNode(edit, node.hash, count, newArray);
     }
 
-    public BitmapIndexedNode createBitmap(int bitmap, Object key, Object val) {
-        return new BitmapIndexedNode(null, bitmap, new Object[] { key, val });
+    static BitmapIndexedNode createBitmap(AtomicReference<Thread> edit, int bitmap, Object key, Object val) {
+        return new BitmapIndexedNode(edit, bitmap, new Object[] { key, val });
+    }
+
+}
+
+static final class PersistentUpdater extends NodeUpdater {
+    ArrayNode editable(ArrayNode node) {
+        return editable(null, node);
+    }
+
+    BitmapIndexedNode editable(BitmapIndexedNode node) {
+        return editable(null, node);
+    }
+
+    BitmapIndexedNode allocSlot(BitmapIndexedNode node, int i, int n) {
+        return allocSlot(null, node, i, n);
+    }
+
+    BitmapIndexedNode freeSlot(BitmapIndexedNode node, int i) {
+        return freeSlot(null, node, i);
+    }
+
+    HashCollisionNode createCollision(int hash, Object key1, Object val1, Object key2, Object val2) {
+        return createCollision(null, hash, key1, val1, key2, val2);
+    }
+
+    BitmapIndexedNode createBitmap(int bitmap, Object key1, Object val1, Object key2, Object val2) {
+        return createBitmap(null, bitmap, key1, val1, key2, val2);
+    }
+
+    HashCollisionNode editable(HashCollisionNode node) {
+        return editable(null, node);
+    }
+
+    HashCollisionNode allocSlot(HashCollisionNode node) {
+        return allocSlot(null, node);
+    }
+    
+    HashCollisionNode freeSlot(HashCollisionNode node, int idx) {
+        return freeSlot(null, node, idx);
+    }
+
+    BitmapIndexedNode createBitmap(int bitmap, Object key, Object val) {
+        return createBitmap(null, bitmap, key, val);
     }
 };
 
@@ -1274,19 +1314,17 @@ static final class TransientUpdater extends NodeUpdater {
     TransientUpdater(AtomicReference<Thread> edit) {
         this.edit = edit;
     }
-    public ArrayNode editable(ArrayNode node) {
-        if(node.edit == edit)
-            return node;
-        return new ArrayNode(edit, node.count, node.array.clone());
+    ArrayNode editable(ArrayNode node) {
+        if(node.edit == edit) return node;
+        return editable(edit, node);
     }
     
-    public BitmapIndexedNode editable(BitmapIndexedNode node) {
-        if(node.edit == edit)
-            return node;
-        return new BitmapIndexedNode(edit, node.bitmap, node.array.clone());
+    BitmapIndexedNode editable(BitmapIndexedNode node) {
+        if(node.edit == edit) return node;
+        return editable(edit, node);
     }
 
-    public BitmapIndexedNode allocSlot(BitmapIndexedNode node, int idx, int n) {
+    BitmapIndexedNode allocSlot(BitmapIndexedNode node, int idx, int n) {
         if(node.edit == edit) {
             if(n*2 < node.array.length) {
                 System.arraycopy(node.array, 2*idx, node.array, 2*(idx+1), 2*(n-idx));
@@ -1298,42 +1336,33 @@ static final class TransientUpdater extends NodeUpdater {
             node.array = newArray;
             return node;
         }
-        Object[] newArray = new Object[2*(n+1)];
-        System.arraycopy(node.array, 0, newArray, 0, 2*idx);
-        System.arraycopy(node.array, 2*idx, newArray, 2*(idx+1), 2*(n-idx));
-        return new BitmapIndexedNode(edit, node.bitmap, newArray);
+        return allocSlot(edit, node, idx, n);
     }
     
-    public HashCollisionNode createCollision(int hash,
-            Object key1, Object val1, Object key2, Object val2) {
-        return new HashCollisionNode(edit, hash, 2, new Object[] {key1, val1, key2, val2});
+    HashCollisionNode createCollision(int hash, Object key1, Object val1, Object key2, Object val2) {
+        return createCollision(edit, hash, key1, val1, key2, val2);
     }
 
-    public BitmapIndexedNode createBitmap(int bitmap, Object key1, Object val1,
-            Object key2, Object val2) {
-        return new BitmapIndexedNode(edit, bitmap, new Object[] { key1, val1, key2, val2 });
+    BitmapIndexedNode createBitmap(int bitmap, Object key1, Object val1, Object key2, Object val2) {
+        return createBitmap(edit, bitmap, key1, val1, key2, val2);
     }
 
-    public BitmapIndexedNode freeSlot(BitmapIndexedNode node, int i, int bit) {
+    BitmapIndexedNode freeSlot(BitmapIndexedNode node, int i) {
         if (node.edit == edit) {
             System.arraycopy(node.array, 2*(i+1), node.array, 2*i, node.array.length - 2*(i+1));
             node.array[node.array.length - 2] = null;
             node.array[node.array.length - 1] = null;
             return node;
         }
-
-        Object[] newArray = new Object[node.array.length - 2];
-        System.arraycopy(node.array, 0, newArray, 0, 2*i);
-        System.arraycopy(node.array, 2*(i+1), newArray, 2*i, node.array.length - 2*(i+1));
-        return new BitmapIndexedNode(edit, node.bitmap, newArray);
+        return freeSlot(edit, node, i);
     }
 
-    public HashCollisionNode editable(HashCollisionNode node) {
+    HashCollisionNode editable(HashCollisionNode node) {
         if (node.edit == edit) return node;
-        return new HashCollisionNode(edit, node.hash, node.count, node.array.clone());
+        return editable(edit, node);
     }
 
-    public HashCollisionNode allocSlot(HashCollisionNode node) {
+    HashCollisionNode allocSlot(HashCollisionNode node) {
         if (node.edit == edit) {
             if (node.array.length > 2*node.count) return node;
             Object[] newArray = new Object[2*(node.count+1)];
@@ -1341,12 +1370,10 @@ static final class TransientUpdater extends NodeUpdater {
             node.array = newArray;
             return node;
         }
-        Object[] newArray = new Object[2*(node.count+1)];
-        System.arraycopy(node.array, 0, newArray, 0, 2*node.count);
-        return new HashCollisionNode(edit, node.hash, node.count, newArray);
+        return allocSlot(edit, node);
     }
     
-    public HashCollisionNode freeSlot(HashCollisionNode node, int idx) {
+    HashCollisionNode freeSlot(HashCollisionNode node, int idx) {
         int count = node.count;
         if (node.edit == edit) {
             node.array[idx] = node.array[2*count-2];
@@ -1354,14 +1381,11 @@ static final class TransientUpdater extends NodeUpdater {
             node.array[2*count-2] = node.array[2*count-1] = null;
             return node;
         }
-        Object[] newArray = new Object[2*count-1];
-        System.arraycopy(node.array, 0, newArray, 0, idx);
-        System.arraycopy(node.array, idx+2, newArray, idx, newArray.length - idx - 2);
-        return new HashCollisionNode(edit, node.hash, count, newArray);
+        return freeSlot(edit, node, idx);
     }
 
-    public BitmapIndexedNode createBitmap(int bitmap, Object key, Object val) {
-        return new BitmapIndexedNode(edit, bitmap, new Object[] { key, val });
+    BitmapIndexedNode createBitmap(int bitmap, Object key, Object val) {
+        return createBitmap(edit, bitmap, key, val);
     }
 }
 }
