@@ -871,28 +871,11 @@ final static class HashCollisionNode implements INode{
 		return new HashCollisionNode(edit, hash, count, newArray);
 	}
 
-	private HashCollisionNode ensureEditable(AtomicReference<Thread> edit, int count, Object[] array){
-		if(this.edit == edit) {
-			this.array = array;
-			this.count = count;
-			return this;
-		}
-		return new HashCollisionNode(edit, hash, count, array);
-	}
-
 	private HashCollisionNode editAndSet(AtomicReference<Thread> edit, int i, Object a) {
 		HashCollisionNode editable = ensureEditable(edit);
 		editable.array[i] = a;
 		return editable;
 	}
-
-	private HashCollisionNode editAndSet(NodeUpdater updater, int i, Object a, int j, Object b) {
-		HashCollisionNode editable = updater.editable(this);
-		editable.array[i] = a;
-		editable.array[j] = b;
-		return editable;
-	}
-
 
 	public INode assoc(NodeUpdater updater, int shift, int hash, Object key, Object val){
 		if(hash == this.hash) {
@@ -1018,32 +1001,6 @@ public static void main(String[] args){
 
 }
 */
-
-private static INode[] cloneAndSet(INode[] array, int i, INode a) {
-	INode[] clone = array.clone();
-	clone[i] = a;
-	return clone;
-}
-
-private static Object[] cloneAndSet(Object[] array, int i, Object a) {
-	Object[] clone = array.clone();
-	clone[i] = a;
-	return clone;
-}
-
-private static Object[] cloneAndSet(Object[] array, int i, Object a, int j, Object b) {
-	Object[] clone = array.clone();
-	clone[i] = a;
-	clone[j] = b;
-	return clone;
-}
-
-private static Object[] removePair(Object[] array, int i) {
-	Object[] newArray = new Object[array.length - 2];
-	System.arraycopy(array, 0, newArray, 0, 2*i);
-	System.arraycopy(array, 2*(i+1), newArray, 2*i, newArray.length - 2*i);
-	return newArray;
-}
 
 private static int bitpos(int hash, int shift){
 	return 1 << mask(hash, shift);
