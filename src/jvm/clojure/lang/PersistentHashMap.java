@@ -395,7 +395,7 @@ final static class BitmapIndexedNode implements INode{
 				return new BitmapIndexedNode(null, bitmap, kvbitmap, cloneAndSet(array, idx, n));
 			if (bitmap == bit) 
 				return null;
-			return new BitmapIndexedNode(null, bitmap ^ bit, bitmap ^ bit, removePair(array, idx));
+			return new BitmapIndexedNode(null, bitmap ^ bit, kvbitmap, removeNode(array, idx));
 		}
 		if(Util.equiv(key, array[idx]))
 			// TODO: collapse
@@ -832,10 +832,17 @@ private static Object[] cloneAndSet(Object[] array, int i, Object a, int j, Obje
 }
 
 private static Object[] removePair(Object[] array, int i) {
-	Object[] newArray = new Object[array.length - 2];
-	System.arraycopy(array, 0, newArray, 0, i);
-	System.arraycopy(array, i+2, newArray, i, newArray.length - i);
-	return newArray;
+    Object[] newArray = new Object[array.length - 2];
+    System.arraycopy(array, 0, newArray, 0, i);
+    System.arraycopy(array, i+2, newArray, i, newArray.length - i);
+    return newArray;
+}
+
+private static Object[] removeNode(Object[] array, int i) {
+    Object[] newArray = new Object[array.length - 1];
+    System.arraycopy(array, 0, newArray, 0, i);
+    System.arraycopy(array, i+1, newArray, i, newArray.length - i);
+    return newArray;
 }
 
 private static INode createNode(int shift, Object key1, Object val1, int key2hash, Object key2, Object val2) {
