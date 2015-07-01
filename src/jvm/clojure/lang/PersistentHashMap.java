@@ -31,7 +31,7 @@ final int count;
 final INode root;
 final IPersistentMap _meta;
 
-final public static PersistentHashMap EMPTY = new PersistentHashMap(0, null);
+final public static PersistentHashMap EMPTY = new PersistentHashMap(0, BitmapIndexedNode.EMPTY);
 final private static Object NOT_FOUND = new Object();
 
 static public IPersistentMap create(Map other){
@@ -115,24 +115,23 @@ static int hash(Object k){
 }
 
 public boolean containsKey(Object key){
-	return (root != null) ? root.find(0, hash(key), key, NOT_FOUND) != NOT_FOUND : false;
+	return root.find(0, hash(key), key, NOT_FOUND) != NOT_FOUND;
 }
 
 public IMapEntry entryAt(Object key){
-	return (root != null) ? root.find(0, hash(key), key) : null;
+	return root.find(0, hash(key), key);
 }
 
 public IPersistentMap assoc(Object key, Object val){
     PersistentNodeEditor editor = new PersistentNodeEditor();
-	INode newroot = (root == null ? BitmapIndexedNode.EMPTY : root) 
-			.assoc(editor, 0, hash(key), key, val);
+	INode newroot = root.assoc(editor, 0, hash(key), key, val);
 	if(newroot == root)
 		return this;
 	return new PersistentHashMap(meta(), editor.addedLeaf ? count+1 : count, newroot);
 }
 
 public Object valAt(Object key, Object notFound){
-	return root != null ? root.find(0, hash(key), key, notFound) : notFound;
+	return root.find(0, hash(key), key, notFound);
 }
 
 public Object valAt(Object key){
@@ -146,12 +145,10 @@ public IPersistentMap assocEx(Object key, Object val) {
 }
 
 public IPersistentMap without(Object key){
-	if(root == null)
-		return this;
 	INode newroot = root.without(PersistentNodeEditor.FOR_WITHOUT, 0, hash(key), key);
 	if(newroot == root)
 		return this;
-	return new PersistentHashMap(meta(), count - 1, newroot); 
+	return new PersistentHashMap(meta(), count - 1, newroot != null ? newroot : BitmapIndexedNode.EMPTY); 
 }
 
 static final Iterator EMPTY_ITER = new Iterator(){
@@ -169,7 +166,7 @@ static final Iterator EMPTY_ITER = new Iterator(){
 };
 
 private Iterator iterator(final IFn f){
-    return (root == null) ? EMPTY_ITER : root.iterator(f);
+    return root.iterator(f);
 }
 
 public Iterator iterator(){
@@ -187,14 +184,11 @@ public Iterator valIterator(){
 public Object kvreduce(IFn f, Object init){
 	if(RT.isReduced(init))
 		return ((IDeref)init).deref();
-	if(root != null){
-		init = root.kvreduce(f,init);
-		if(RT.isReduced(init))
-			return ((IDeref)init).deref();
-		else
-			return init;
-	}
-	return init;
+	init = root.kvreduce(f,init);
+	if(RT.isReduced(init))
+	    return ((IDeref)init).deref();
+	else
+	    return init;
 }
 
 public Object fold(long n, final IFn combinef, final IFn reducef,
@@ -203,8 +197,7 @@ public Object fold(long n, final IFn combinef, final IFn reducef,
 	Callable top = new Callable(){
 		public Object call() throws Exception{
 			Object ret = combinef.invoke();
-			if(root != null)
-				ret = combinef.invoke(ret, root.fold(combinef,reducef,fjtask,fjfork,fjjoin));
+			ret = combinef.invoke(ret, root.fold(combinef,reducef,fjtask,fjfork,fjjoin));
 			return ret;
 		}
 	};
@@ -216,7 +209,7 @@ public int count(){
 }
 
 public ISeq seq(){
-	return root != null ? root.nodeSeq() : null; 
+	return root.nodeSeq(); 
 }
 
 public IPersistentCollection empty(){
@@ -256,19 +249,16 @@ static final class TransientHashMap extends ATransientMap {
 	}
 	
 	ITransientMap doAssoc(Object key, Object val) {
-//		Box leafFlag = new Box(null);
-		INode n = (root == null ? BitmapIndexedNode.EMPTY : root)
-			.assoc(editor, 0, hash(key), key, val);
+		INode n = root.assoc(editor, 0, hash(key), key, val);
 		if (n != this.root)
 			this.root = n;
 		return this;
 	}
 
 	ITransientMap doWithout(Object key) {
-		if (root == null) return this;
 		INode n = root.without(editor, 0, hash(key), key);
 		if (n != root)
-			this.root = n;
+			this.root = n != null ? n : BitmapIndexedNode.EMPTY;
 		return this;
 	}
 
@@ -280,8 +270,6 @@ static final class TransientHashMap extends ATransientMap {
 	}
 
 	Object doValAt(Object key, Object notFound) {
-		if (root == null)
-			return notFound;
 		return root.find(0, hash(key), key, notFound);
 	}
 
@@ -309,7 +297,7 @@ static interface INode extends Serializable {
     public Object kvreduce(IFn f, Object init);
 
 	Object fold(IFn combinef, IFn reducef, IFn fjtask, IFn fjfork, IFn fjjoin);
-
+	
     // returns the result of (f [k v]) for each iterated element
     Iterator iterator(IFn f);
 }
