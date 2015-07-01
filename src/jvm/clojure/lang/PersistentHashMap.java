@@ -15,8 +15,6 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.management.RuntimeErrorException;
-
 /*
  A persistent rendition of Phil Bagwell's Hash Array Mapped Trie
 
@@ -125,12 +123,12 @@ public IMapEntry entryAt(Object key){
 }
 
 public IPersistentMap assoc(Object key, Object val){
-	Box addedLeaf = new Box(null);
+    PersistentNodeEditor editor = new PersistentNodeEditor();
 	INode newroot = (root == null ? BitmapIndexedNode.EMPTY : root) 
-			.assoc(0, hash(key), key, val, addedLeaf);
+			.assoc(editor, 0, hash(key), key, val);
 	if(newroot == root)
 		return this;
-	return new PersistentHashMap(meta(), addedLeaf.val == null ? count : count + 1, newroot);
+	return new PersistentHashMap(meta(), editor.addedLeaf ? count+1 : count, newroot);
 }
 
 public Object valAt(Object key, Object notFound){
@@ -150,7 +148,7 @@ public IPersistentMap assocEx(Object key, Object val) {
 public IPersistentMap without(Object key){
 	if(root == null)
 		return this;
-	INode newroot = root.without(0, hash(key), key);
+	INode newroot = root.without(PersistentNodeEditor.FOR_WITHOUT, 0, hash(key), key);
 	if(newroot == root)
 		return this;
 	return new PersistentHashMap(meta(), count - 1, newroot); 
@@ -243,46 +241,41 @@ public IPersistentMap meta(){
 }
 
 static final class TransientHashMap extends ATransientMap {
-	final AtomicReference<Thread> edit;
+	volatile TransientNodeEditor editor;
 	volatile INode root;
 	volatile int count;
-	final Box leafFlag = new Box(null);
-
 
 	TransientHashMap(PersistentHashMap m) {
-		this(new AtomicReference<Thread>(Thread.currentThread()), m.root, m.count);
+		this(new TransientNodeEditor(Thread.currentThread(), m.count), m.root, m.count);
 	}
 	
-	TransientHashMap(AtomicReference<Thread> edit, INode root, int count) {
-		this.edit = edit;
+	TransientHashMap(TransientNodeEditor editor, INode root, int count) {
+		this.editor = editor;
 		this.root = root; 
 		this.count = count; 
 	}
-
+	
 	ITransientMap doAssoc(Object key, Object val) {
 //		Box leafFlag = new Box(null);
-		leafFlag.val = null;
 		INode n = (root == null ? BitmapIndexedNode.EMPTY : root)
-			.assoc(edit, 0, hash(key), key, val, leafFlag);
+			.assoc(editor, 0, hash(key), key, val);
 		if (n != this.root)
-			this.root = n; 
-		if(leafFlag.val != null) this.count++;
+			this.root = n;
 		return this;
 	}
 
 	ITransientMap doWithout(Object key) {
 		if (root == null) return this;
-//		Box leafFlag = new Box(null);
-		leafFlag.val = null;
-		INode n = root.without(edit, 0, hash(key), key, leafFlag);
+		INode n = root.without(editor, 0, hash(key), key);
 		if (n != root)
 			this.root = n;
-		if(leafFlag.val != null) this.count--;
 		return this;
 	}
 
 	IPersistentMap doPersistent() {
-		edit.set(null);
+		editor.edit.set(null);
+		int count = editor.count;
+		editor = null;
 		return new PersistentHashMap(count, root);
 	}
 
@@ -293,29 +286,25 @@ static final class TransientHashMap extends ATransientMap {
 	}
 
 	int doCount() {
-		return count;
+		return editor.count;
 	}
 	
 	void ensureEditable(){
-		if(edit.get() == null)
+		if(editor == null)
 			throw new IllegalAccessError("Transient used after persistent! call");
 	}
 }
 
 static interface INode extends Serializable {
-	INode assoc(int shift, int hash, Object key, Object val, Box addedLeaf);
-
-	INode without(int shift, int hash, Object key);
-
 	IMapEntry find(int shift, int hash, Object key);
 
 	Object find(int shift, int hash, Object key, Object notFound);
 
 	ISeq nodeSeq();
 
-	INode assoc(AtomicReference<Thread> edit, int shift, int hash, Object key, Object val, Box addedLeaf);
+	INode assoc(INodeEditor editor, int shift, int hash, Object key, Object val);
 
-	INode without(AtomicReference<Thread> edit, int shift, int hash, Object key, Box removedLeaf);
+	INode without(INodeEditor editor, int shift, int hash, Object key);
 
     public Object kvreduce(IFn f, Object init);
 
@@ -323,6 +312,205 @@ static interface INode extends Serializable {
 
     // returns the result of (f [k v]) for each iterated element
     Iterator iterator(IFn f);
+}
+
+static interface INodeEditor {
+    void inc();
+    void dec();
+    
+    INode node(int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2);
+    INode nest(int shift, HashCollisionNode node, int h, Object k, Object v);
+
+    BitmapIndexedNode edit(BitmapIndexedNode node);
+    BitmapIndexedNode insert2(BitmapIndexedNode node, int idx);
+    BitmapIndexedNode remove2(BitmapIndexedNode node, int idx);
+    BitmapIndexedNode remove1(BitmapIndexedNode node, int idx);
+
+    HashCollisionNode edit(HashCollisionNode node);
+    HashCollisionNode insert(HashCollisionNode node);
+    HashCollisionNode remove(HashCollisionNode node, int idx);    
+}
+
+final static class TransientNodeEditor implements INodeEditor {
+    final AtomicReference<Thread> edit;
+    int count;
+
+    public TransientNodeEditor(Thread t, int count) {
+        edit = new AtomicReference<Thread>(t);
+        this.count = count;
+    }
+    
+    public void inc() {
+        count++;
+    }
+
+    public void dec() {
+        count--;
+    }
+
+    public BitmapIndexedNode edit(BitmapIndexedNode node) {
+        if (node.edit == edit) return node;
+        return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, node.array.clone());
+    }
+
+    public BitmapIndexedNode insert2(BitmapIndexedNode node, int idx) {
+        int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap);
+        if (node.edit == edit && node.array.length >= n + 2) {
+            System.arraycopy(node.array, idx, node.array, idx+2, n-idx);
+            return node;
+        }
+        Object[] newArray = new Object[n + 4]; // room for growth
+        System.arraycopy(node.array, 0, newArray, 0, idx);
+        System.arraycopy(node.array, idx, newArray, idx+2, n-idx);
+        return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
+    }
+
+    public BitmapIndexedNode remove2(BitmapIndexedNode node, int idx) {
+        int n = node.array.length-2;
+        if (node.edit != edit) {
+            Object[] newArray = new Object[n];
+            System.arraycopy(node.array, 0, newArray, 0, idx);
+            System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
+            return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
+        }
+        System.arraycopy(node.array, idx+2, node.array, idx, n-idx);
+        node.array[n] = node.array[n+1] = null;
+        return node;
+    }
+
+    public BitmapIndexedNode remove1(BitmapIndexedNode node, int idx) {
+        int n = node.array.length-1;
+        if (node.edit != edit) {
+            Object[] newArray = new Object[n];
+            System.arraycopy(node.array, 0, newArray, 0, idx);
+            System.arraycopy(node.array, idx+1, newArray, idx, n-idx);
+            return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
+        }
+        System.arraycopy(node.array, idx+1, node.array, idx, n-idx);
+        node.array[n] = null;
+        return node;
+    }
+
+    public HashCollisionNode edit(HashCollisionNode node) {
+        if (node.edit == edit) return node;
+        return new HashCollisionNode(edit, node.hash, node.count, node.array.clone());
+    }
+
+    public HashCollisionNode insert(HashCollisionNode node) {
+        int n = node.count * 2;
+        if (node.edit == edit && node.array.length >= n + 2) return node;
+        Object[] newArray = new Object[n + 2];
+        System.arraycopy(node.array, 0, newArray, 0, n);
+        return new HashCollisionNode(edit, node.hash, node.count, newArray);
+    }
+
+    public HashCollisionNode remove(HashCollisionNode node, int idx) {
+        int n = node.array.length-2;
+        if (node.edit != edit) {
+            Object[] newArray = new Object[n];
+            System.arraycopy(node.array, 0, newArray, 0, idx);
+            System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
+            return new HashCollisionNode(edit, node.hash, node.count, newArray);
+        }
+        node.array[idx] = node.array[n];
+        node.array[idx+1] = node.array[n+1];
+        node.array[n] = node.array[n+1] = null;
+        return node;
+    }
+
+    public INode node(int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2) {
+        if (h1 == h2) return new HashCollisionNode(edit, h1, 2, new Object[] { k1, v1, k2, v2 });
+        int bit1 = bitpos(h1, shift);
+        int bit2 = bitpos(h2, shift);
+        if (bit1 == bit2) return new BitmapIndexedNode(edit, bit1, 0, new Object[] { node(shift+5, h1, k1, v1, h2, k2, v2), null, null});
+        return new BitmapIndexedNode(edit, bit1 | bit2, bit1 | bit2,
+                (bit1 - bit2) < 0 ? new Object[] { k1, v1, k2, v2, null, null } : new Object[] { k2, v2, k1, v1, null, null });
+    }
+
+    public INode nest(int shift, HashCollisionNode node, int h, Object k, Object v) {
+        int bit = bitpos(h, shift);
+        int bitn = bitpos(node.hash, shift);
+        if (bit == bitn) return new BitmapIndexedNode(edit, bit, 0, new Object[] { nest(shift+5, node, h, k, v), null, null});
+        return new BitmapIndexedNode(edit, bit | bitn,  bit,
+                (bit - bitn) < 0 ? new Object[] { k, v, node, null, null } : new Object[] { node, k, v, null, null });
+    }
+}
+
+final static class PersistentNodeEditor implements INodeEditor {
+    static final PersistentNodeEditor FOR_WITHOUT = new PersistentNodeEditor();
+    
+    boolean addedLeaf = false;
+
+    public void inc() {
+        addedLeaf = true;
+    }
+
+    public void dec() {
+    }
+    
+    public BitmapIndexedNode edit(BitmapIndexedNode node) {
+        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, node.array.clone());
+    }
+
+    public BitmapIndexedNode insert2(BitmapIndexedNode node, int idx) {
+        int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap);
+        Object[] newArray = new Object[n + 2];
+        System.arraycopy(node.array, 0, newArray, 0, idx);
+        System.arraycopy(node.array, idx, newArray, idx+2, n-idx);
+        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, newArray);
+    }
+
+    public BitmapIndexedNode remove2(BitmapIndexedNode node, int idx) {
+        int n = node.array.length-2;
+        Object[] newArray = new Object[n];
+        System.arraycopy(node.array, 0, newArray, 0, idx);
+        System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
+        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, newArray);
+    }
+
+    public BitmapIndexedNode remove1(BitmapIndexedNode node, int idx) {
+        int n = node.array.length-1;
+        Object[] newArray = new Object[n];
+        System.arraycopy(node.array, 0, newArray, 0, idx);
+        System.arraycopy(node.array, idx+1, newArray, idx, n-idx);
+        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, newArray);
+    }
+
+    public HashCollisionNode edit(HashCollisionNode node) {
+        return new HashCollisionNode(null, node.hash, node.count, node.array.clone());
+    }
+
+    public HashCollisionNode insert(HashCollisionNode node) {
+        int n = node.count * 2;
+        Object[] newArray = new Object[n + 2];
+        System.arraycopy(node.array, 0, newArray, 0, n);
+        return new HashCollisionNode(null, node.hash, node.count, newArray);
+    }
+
+    public HashCollisionNode remove(HashCollisionNode node, int idx) {
+        int n = node.array.length-2;
+        Object[] newArray = new Object[n];
+        System.arraycopy(node.array, 0, newArray, 0, idx);
+        System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
+        return new HashCollisionNode(null, node.hash, node.count, newArray);
+    }
+
+    public INode node(int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2) {
+        if (h1 == h2) return new HashCollisionNode(null, h1, 2, new Object[] { k1, v1, k2, v2 });
+        int bit1 = bitpos(h1, shift);
+        int bit2 = bitpos(h2, shift);
+        if (bit1 == bit2) return new BitmapIndexedNode(null, bit1, 0, new Object[] { node(shift+5, h1, k1, v1, h2, k2, v2)});
+        return new BitmapIndexedNode(null, bit1 | bit2, bit1 | bit2,
+                (bit1 - bit2) < 0 ? new Object[] { k1, v1, k2, v2 } : new Object[] { k2, v2, k1, v1 });
+    }
+
+    public INode nest(int shift, HashCollisionNode node, int h, Object k, Object v) {
+        int bit = bitpos(h, shift);
+        int bitn = bitpos(node.hash, shift);
+        if (bit == bitn) return new BitmapIndexedNode(null, bit, 0, new Object[] { nest(shift+5, node, h, k, v) });
+        return new BitmapIndexedNode(null, bit | bitn,  bit,
+                (bit - bitn) < 0 ? new Object[] { k, v, node } : new Object[] { node, k, v });
+    }
 }
 
 final static class BitmapIndexedNode implements INode{
@@ -344,65 +532,6 @@ final static class BitmapIndexedNode implements INode{
 		this.edit = edit;
 	}
 
-	public INode assoc(int shift, int hash, Object key, Object val, Box addedLeaf){
-		int bit = bitpos(hash, shift);
-		int idx = index(bit);
-		if((bitmap & bit) != 0) {
-			if((kvbitmap & bit) == 0) {
-	            INode node = (INode) array[idx];
-				INode n = node.assoc(shift + 5, hash, key, val, addedLeaf);
-				if(n == node)
-					return this;
-				return new BitmapIndexedNode(null, bitmap, kvbitmap, cloneAndSet(array, idx, n));
-			} 
-            Object k = array[idx];
-            Object v = array[idx+1];
-			if(Util.equiv(key, k)) {
-				if(val == v)
-					return this;
-				return new BitmapIndexedNode(null, bitmap, kvbitmap, cloneAndSet(array, idx+1, val));
-			} 
-			addedLeaf.val = addedLeaf;
-            int n = Integer.bitCount(bitmap) + Integer.bitCount(kvbitmap);
-            Object[] newArray = new Object[n - 1];
-            System.arraycopy(array, 0, newArray, 0, idx);
-            newArray[idx] = createNode(shift + 5, k, v, hash, key, val);
-            System.arraycopy(array, idx+2, newArray, idx+1, n-idx-2);
-			return new BitmapIndexedNode(null, bitmap, kvbitmap ^ bit, newArray);
-		} else {
-			int n = Integer.bitCount(bitmap) + Integer.bitCount(kvbitmap);
-            addedLeaf.val = addedLeaf; 
-			Object[] newArray = new Object[n + 2];
-			System.arraycopy(array, 0, newArray, 0, idx);
-			newArray[idx] = key;
-			newArray[idx+1] = val;
-			System.arraycopy(array, idx, newArray, idx+2, n-idx);
-			return new BitmapIndexedNode(null, bitmap | bit, kvbitmap | bit, newArray);
-		}
-	}
-
-	public INode without(int shift, int hash, Object key){
-		int bit = bitpos(hash, shift);
-		if((bitmap & bit) == 0)
-			return this;
-		int idx = index(bit);
-		if((kvbitmap & bit) == 0) {
-            INode node = (INode) array[idx];
-			INode n = node.without(shift + 5, hash, key);
-			if (n == node)
-				return this;
-			if (n != null)
-				return new BitmapIndexedNode(null, bitmap, kvbitmap, cloneAndSet(array, idx, n));
-			if (bitmap == bit) 
-				return null;
-			return new BitmapIndexedNode(null, bitmap ^ bit, kvbitmap, removeNode(array, idx));
-		}
-		if(Util.equiv(key, array[idx]))
-			// TODO: collapse
-			return new BitmapIndexedNode(null, bitmap ^ bit, kvbitmap ^ bit, removePair(array, idx));
-		return this;
-	}
-	
 	public IMapEntry find(int shift, int hash, Object key){
 		int bit = bitpos(hash, shift);
 		if((bitmap & bit) == 0)
@@ -447,120 +576,84 @@ final static class BitmapIndexedNode implements INode{
 		return NodeSeq.kvreduce(array, reducef, combinef.invoke(), bitmap, kvbitmap);
 	}
 
-	private BitmapIndexedNode ensureEditable(AtomicReference<Thread> edit){
-		if(this.edit == edit)
-			return this;
-		int n = Integer.bitCount(bitmap) + Integer.bitCount(kvbitmap);
-		Object[] newArray = new Object[n >= 0 ? n+2 : 4]; // make room for next assoc
-		System.arraycopy(array, 0, newArray, 0, n);
-		return new BitmapIndexedNode(edit, bitmap, kvbitmap, newArray);
-	}
-	
-	private BitmapIndexedNode editAndSet(AtomicReference<Thread> edit, int i, Object a) {
-		BitmapIndexedNode editable = ensureEditable(edit);
+	private BitmapIndexedNode editAndSet(INodeEditor editor, int i, Object a) {
+		BitmapIndexedNode editable = editor.edit(this);
 		editable.array[i] = a;
 		return editable;
 	}
 
-	private BitmapIndexedNode editAndSet(AtomicReference<Thread> edit, int i, Object a, int j, Object b) {
-		BitmapIndexedNode editable = ensureEditable(edit);
-		editable.array[i] = a;
-		editable.array[j] = b;
-		return editable;
-	}
-
-    private BitmapIndexedNode editAndRemovePair(AtomicReference<Thread> edit, int bit, int i) {
+    private BitmapIndexedNode editAndRemovePair(INodeEditor editor, int bit, int i) {
         if (bitmap == bit) 
             return null;
-        BitmapIndexedNode editable = ensureEditable(edit);
+        BitmapIndexedNode editable = editor.remove2(this, i);
         editable.bitmap &= ~bit;
         editable.kvbitmap &= ~bit;
-        System.arraycopy(editable.array, i+2, editable.array, i, editable.array.length - i - 2);
-        editable.array[editable.array.length - 2] = null;
-        editable.array[editable.array.length - 1] = null;
         return editable;
     }
 
-    private BitmapIndexedNode editAndRemoveNode(AtomicReference<Thread> edit, int bit, int i) {
+    private BitmapIndexedNode editAndRemoveNode(INodeEditor editor, int bit, int i) {
         if (bitmap == bit) 
             return null;
-        BitmapIndexedNode editable = ensureEditable(edit);
+        BitmapIndexedNode editable = editor.remove1(this, i);
         editable.bitmap &= ~bit;
         editable.kvbitmap &= ~bit;
-        System.arraycopy(editable.array, i+1, editable.array, i, editable.array.length - i - 1);
-        editable.array[editable.array.length - 1] = null;
         return editable;
     }
-
-    public INode assoc(AtomicReference<Thread> edit, int shift, int hash, Object key, Object val, Box addedLeaf){
+    
+    public INode assoc(INodeEditor editor, int shift, int hash, Object key, Object val){
 		int bit = bitpos(hash, shift);
 		int idx = index(bit);
-		if((bitmap & bit) != 0) {
-	        if((kvbitmap & bit) == 0) {
-                INode node = (INode) array[idx];
-                INode n = node.assoc(edit, shift + 5, hash, key, val, addedLeaf);
-				if(n == node)
-					return this;
-				return editAndSet(edit, idx, n);
-			} 
-	        Object k = array[idx];
-            Object v = array[idx+1];
-            if(Util.equiv(key, k)) {
-                if(val == v)
-    					return this;
-				return editAndSet(edit, idx+1, val);
-			} 
-			addedLeaf.val = addedLeaf;
-			BitmapIndexedNode editable = ensureEditable(edit);
-			editable.kvbitmap ^= bit;
-            editable.array[idx] = createNode(edit, shift + 5, k, v, hash, key, val);
-			System.arraycopy(editable.array, idx+2, editable.array, idx+1, editable.array.length - idx - 2);
-			editable.array[editable.array.length - 1] = null;
-			return editable;
-		} else {
-	        int n = Integer.bitCount(bitmap) + Integer.bitCount(kvbitmap);
-            addedLeaf.val = addedLeaf;
-            BitmapIndexedNode editable = ensureEditable(edit);
-	        if(n+2 <= array.length) {
-				System.arraycopy(editable.array, idx, editable.array, idx+2, n-idx);
-				editable.array[idx] = key;
-				editable.array[idx+1] = val;
-                editable.bitmap |= bit;
-                editable.kvbitmap |= bit;
-				return editable;
-			}
-	        Object[] newArray = new Object[n+4];
-			System.arraycopy(array, 0, newArray, 0, idx);
-			newArray[idx] = key;
-			newArray[idx+1] = val;
-			System.arraycopy(array, idx, newArray, idx+2, n-idx);
-			editable.array = newArray;
+		if((bitmap & bit) == 0) {
+            int n = Integer.bitCount(bitmap) + Integer.bitCount(kvbitmap);
+            editor.inc();
+            BitmapIndexedNode editable = editor.insert2(this, idx);
+            editable.array[idx] = key;
+            editable.array[idx+1] = val;
             editable.bitmap |= bit;
             editable.kvbitmap |= bit;
-			return editable;
+            return editable;
 		}
+		if((kvbitmap & bit) == 0) {
+		    INode node = (INode) array[idx];
+		    INode n = node.assoc(editor, shift + 5, hash, key, val);
+		    if(n == node)
+		        return this;
+		    return editAndSet(editor, idx, n);
+		} 
+		Object k = array[idx];
+		Object v = array[idx+1];
+		if(Util.equiv(key, k)) {
+		    if(val == v)
+		        return this;
+		    return editAndSet(editor, idx+1, val);
+		}
+		editor.inc();
+		BitmapIndexedNode editable = editor.remove1(this, idx+1);
+		editable.kvbitmap ^= bit;
+        editable.array[idx] = editor.node(shift + 5, hash, key, val, hash(k), k, v);
+		return editable;
 	}
 
-	public INode without(AtomicReference<Thread> edit, int shift, int hash, Object key, Box removedLeaf){
+	public INode without(INodeEditor editor, int shift, int hash, Object key){
 		int bit = bitpos(hash, shift);
 		if((bitmap & bit) == 0)
 			return this;
 		int idx = index(bit);
         if((kvbitmap & bit) == 0) {
             INode node = (INode) array[idx];
-            INode n = node.without(edit, shift + 5, hash, key, removedLeaf);
+            INode n = node.without(editor, shift + 5, hash, key);
             if (n == node)
 				return this;
 			if (n != null)
-				return editAndSet(edit, idx, n); 
+				return editAndSet(editor, idx, n); 
 			if (bitmap == bit) 
 				return null;
-			return editAndRemoveNode(edit, bit, idx); 
+			return editAndRemoveNode(editor, bit, idx); 
 		}
 		if(Util.equiv(key, array[idx])) {
-			removedLeaf.val = removedLeaf;
+		    editor.dec();
 			// TODO: collapse
-			return editAndRemovePair(edit, bit, idx); 			
+			return editAndRemovePair(editor, bit, idx); 			
 		}
 		return this;
 	}
@@ -578,35 +671,6 @@ final static class HashCollisionNode implements INode{
 		this.hash = hash;
 		this.count = count;
 		this.array = array;
-	}
-
-	public INode assoc(int shift, int hash, Object key, Object val, Box addedLeaf){
-		if(hash == this.hash) {
-			int idx = findIndex(key);
-			if(idx != -1) {
-				if(array[idx + 1] == val)
-					return this;
-				return new HashCollisionNode(null, hash, count, cloneAndSet(array, idx + 1, val));
-			}
-			Object[] newArray = new Object[2 * (count + 1)];
-			System.arraycopy(array, 0, newArray, 0, 2 * count);
-			newArray[2 * count] = key;
-			newArray[2 * count + 1] = val;
-			addedLeaf.val = addedLeaf;
-			return new HashCollisionNode(edit, hash, count + 1, newArray);
-		}
-		// nest it in a bitmap node
-		return new BitmapIndexedNode(null, bitpos(this.hash, shift), 0, new Object[] {this})
-			.assoc(shift, hash, key, val, addedLeaf);
-	}
-
-	public INode without(int shift, int hash, Object key){
-		int idx = findIndex(key);
-		if(idx == -1)
-			return this;
-		if(count == 1)
-			return null;
-		return new HashCollisionNode(null, hash, count - 1, removePair(array, idx/2));
 	}
 
 	public IMapEntry find(int shift, int hash, Object key){
@@ -652,74 +716,37 @@ final static class HashCollisionNode implements INode{
 		return -1;
 	}
 
-	private HashCollisionNode ensureEditable(AtomicReference<Thread> edit){
-		if(this.edit == edit)
-			return this;
-		Object[] newArray = new Object[2*(count+1)]; // make room for next assoc
-		System.arraycopy(array, 0, newArray, 0, 2*count);
-		return new HashCollisionNode(edit, hash, count, newArray);
-	}
+	public INode assoc(INodeEditor editor, int shift, int hash, Object key, Object val){
+        if(hash != this.hash) 
+            // nest it in a bitmap node
+            return new BitmapIndexedNode(edit, bitpos(this.hash, shift), 0, new Object[] {this, null, null})
+                .assoc(editor, shift, hash, key, val);
 
-	private HashCollisionNode ensureEditable(AtomicReference<Thread> edit, int count, Object[] array){
-		if(this.edit == edit) {
-			this.array = array;
-			this.count = count;
-			return this;
-		}
-		return new HashCollisionNode(edit, hash, count, array);
-	}
-
-	private HashCollisionNode editAndSet(AtomicReference<Thread> edit, int i, Object a) {
-		HashCollisionNode editable = ensureEditable(edit);
-		editable.array[i] = a;
-		return editable;
-	}
-
-	private HashCollisionNode editAndSet(AtomicReference<Thread> edit, int i, Object a, int j, Object b) {
-		HashCollisionNode editable = ensureEditable(edit);
-		editable.array[i] = a;
-		editable.array[j] = b;
-		return editable;
-	}
-
-
-	public INode assoc(AtomicReference<Thread> edit, int shift, int hash, Object key, Object val, Box addedLeaf){
-		if(hash == this.hash) {
-			int idx = findIndex(key);
-			if(idx != -1) {
-				if(array[idx + 1] == val)
-					return this;
-				return editAndSet(edit, idx+1, val); 
-			}
-			if (array.length > 2*count) {
-				addedLeaf.val = addedLeaf;
-				HashCollisionNode editable = editAndSet(edit, 2*count, key, 2*count+1, val);
-				editable.count++;
-				return editable;
-			}
-			Object[] newArray = new Object[array.length + 2];
-			System.arraycopy(array, 0, newArray, 0, array.length);
-			newArray[array.length] = key;
-			newArray[array.length + 1] = val;
-			addedLeaf.val = addedLeaf;
-			return ensureEditable(edit, count + 1, newArray);
-		}
-		// nest it in a bitmap node
-		return new BitmapIndexedNode(edit, bitpos(this.hash, shift), 0, new Object[] {this, null, null})
-			.assoc(edit, shift, hash, key, val, addedLeaf);
+        int idx = findIndex(key);
+        if(idx != -1) {
+            if(array[idx + 1] == val)
+                return this;
+            HashCollisionNode editable1 = editor.edit(this);
+            editable1.array[idx+1] = val;
+            return editable1; 
+        }
+        
+        editor.inc();
+        HashCollisionNode editable = editor.insert(this);
+        editable.array[2*count] = key;
+        editable.array[2*count+1] = val;
+        editable.count++;
+        return editable;
 	}	
 
-	public INode without(AtomicReference<Thread> edit, int shift, int hash, Object key, Box removedLeaf){
+	public INode without(INodeEditor editor, int shift, int hash, Object key){
 		int idx = findIndex(key);
 		if(idx == -1)
 			return this;
-		removedLeaf.val = removedLeaf;
+		editor.dec();
 		if(count == 1)
 			return null;
-		HashCollisionNode editable = ensureEditable(edit);
-		editable.array[idx] = editable.array[2*count-2];
-		editable.array[idx+1] = editable.array[2*count-1];
-		editable.array[2*count-2] = editable.array[2*count-1] = null;
+		HashCollisionNode editable = editor.remove(this, idx);
 		editable.count--;
 		return editable;
 	}
@@ -811,60 +838,6 @@ public static void main(String[] args){
 
 }
 */
-
-private static INode[] cloneAndSet(INode[] array, int i, INode a) {
-	INode[] clone = array.clone();
-	clone[i] = a;
-	return clone;
-}
-
-private static Object[] cloneAndSet(Object[] array, int i, Object a) {
-	Object[] clone = array.clone();
-	clone[i] = a;
-	return clone;
-}
-
-private static Object[] cloneAndSet(Object[] array, int i, Object a, int j, Object b) {
-    Object[] clone = array.clone();
-    clone[i] = a;
-    clone[j] = b;
-    return clone;
-}
-
-private static Object[] removePair(Object[] array, int i) {
-    Object[] newArray = new Object[array.length - 2];
-    System.arraycopy(array, 0, newArray, 0, i);
-    System.arraycopy(array, i+2, newArray, i, newArray.length - i);
-    return newArray;
-}
-
-private static Object[] removeNode(Object[] array, int i) {
-    Object[] newArray = new Object[array.length - 1];
-    System.arraycopy(array, 0, newArray, 0, i);
-    System.arraycopy(array, i+1, newArray, i, newArray.length - i);
-    return newArray;
-}
-
-private static INode createNode(int shift, Object key1, Object val1, int key2hash, Object key2, Object val2) {
-	int key1hash = hash(key1);
-	if(key1hash == key2hash)
-		return new HashCollisionNode(null, key1hash, 2, new Object[] {key1, val1, key2, val2});
-	Box addedLeaf = new Box(null);
-	AtomicReference<Thread> edit = new AtomicReference<Thread>();
-	return BitmapIndexedNode.EMPTY
-		.assoc(edit, shift, key1hash, key1, val1, addedLeaf)
-		.assoc(edit, shift, key2hash, key2, val2, addedLeaf);
-}
-
-private static INode createNode(AtomicReference<Thread> edit, int shift, Object key1, Object val1, int key2hash, Object key2, Object val2) {
-	int key1hash = hash(key1);
-	if(key1hash == key2hash)
-		return new HashCollisionNode(null, key1hash, 2, new Object[] {key1, val1, key2, val2});
-	Box addedLeaf = new Box(null);
-	return BitmapIndexedNode.EMPTY
-		.assoc(edit, shift, key1hash, key1, val1, addedLeaf)
-		.assoc(edit, shift, key2hash, key2, val2, addedLeaf);
-}
 
 private static int bitpos(int hash, int shift){
 	return 1 << mask(hash, shift);
