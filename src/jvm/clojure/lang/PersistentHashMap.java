@@ -335,7 +335,7 @@ final static class TransientNodeEditor implements INodeEditor {
             System.arraycopy(node.array, idx, node.array, idx+2, n-idx);
             return node;
         }
-        Object[] newArray = new Object[n + 4]; // room for growth
+        Object[] newArray = new Object[n + 8]; // room for growth
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx, newArray, idx+2, n-idx);
         return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
