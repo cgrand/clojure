@@ -190,14 +190,10 @@ public Object fold(long n, final IFn combinef, final IFn reducef,
 	return fjinvoke.invoke(top);
 }
 
-public Object merge(Object src, Object noFastPath) {
-    if (src instanceof PersistentHashMap) {
-        TransientNodeEditor editor = new TransientNodeEditor(Thread.currentThread(), 0);
-        PersistentHashMap srcmap = (PersistentHashMap) src;
-        INode newRoot = merge(editor, 0, this.root, srcmap.root);
-        return new PersistentHashMap(meta(), count + srcmap.count + editor.count, newRoot);
-    }
-    return noFastPath;
+public Object merge(PersistentHashMap src) {
+    TransientNodeEditor editor = new TransientNodeEditor(Thread.currentThread(), 0);
+    INode newRoot = merge(editor, 0, this.root, src.root);
+    return new PersistentHashMap(meta(), count + src.count + editor.count, newRoot);
 }
 
 public int count(){
