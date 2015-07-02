@@ -151,20 +151,6 @@ public IPersistentMap without(Object key){
 	return new PersistentHashMap(meta(), count - 1, newroot != null ? newroot : BitmapIndexedNode.EMPTY); 
 }
 
-static final Iterator EMPTY_ITER = new Iterator(){
-    public boolean hasNext(){
-        return false;
-    }
-
-    public Object next(){
-        throw new NoSuchElementException();
-    }
-
-    public void remove(){
-        throw new UnsupportedOperationException();
-    }
-};
-
 private Iterator iterator(final IFn f){
     return root.iterator(f);
 }
