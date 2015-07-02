@@ -292,17 +292,19 @@ static interface INodeEditor {
     void inc();
     void dec();
     
-    INode node(int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2);
-    INode nest(int shift, HashCollisionNode node, int h, Object k, Object v);
-
     BitmapIndexedNode edit(BitmapIndexedNode node);
     BitmapIndexedNode insert2(BitmapIndexedNode node, int idx);
     BitmapIndexedNode remove2(BitmapIndexedNode node, int idx);
     BitmapIndexedNode remove1(BitmapIndexedNode node, int idx);
 
+    Object[] array(Object a);
+    Object[] array(Object a, Object b);
+    Object[] array(Object a, Object b, Object c);
+    Object[] array(Object a, Object b, Object c, Object d);
+    
     HashCollisionNode edit(HashCollisionNode node);
     HashCollisionNode insert(HashCollisionNode node);
-    HashCollisionNode remove(HashCollisionNode node, int idx);    
+    HashCollisionNode remove(HashCollisionNode node, int idx);
 }
 
 final static class TransientNodeEditor implements INodeEditor {
@@ -392,21 +394,20 @@ final static class TransientNodeEditor implements INodeEditor {
         return node;
     }
 
-    public INode node(int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2) {
-        if (h1 == h2) return new HashCollisionNode(edit, h1, 2, new Object[] { k1, v1, k2, v2 });
-        int bit1 = bitpos(h1, shift);
-        int bit2 = bitpos(h2, shift);
-        if (bit1 == bit2) return new BitmapIndexedNode(edit, bit1, 0, new Object[] { node(shift+5, h1, k1, v1, h2, k2, v2), null, null});
-        return new BitmapIndexedNode(edit, bit1 | bit2, bit1 | bit2,
-                (bit1 - bit2) < 0 ? new Object[] { k1, v1, k2, v2, null, null } : new Object[] { k2, v2, k1, v1, null, null });
+    public Object[] array(Object a) {
+        return new Object[] {a, null, null};
     }
 
-    public INode nest(int shift, HashCollisionNode node, int h, Object k, Object v) {
-        int bit = bitpos(h, shift);
-        int bitn = bitpos(node.hash, shift);
-        if (bit == bitn) return new BitmapIndexedNode(edit, bit, 0, new Object[] { nest(shift+5, node, h, k, v), null, null});
-        return new BitmapIndexedNode(edit, bit | bitn,  bit,
-                (bit - bitn) < 0 ? new Object[] { k, v, node, null, null } : new Object[] { node, k, v, null, null });
+    public Object[] array(Object a, Object b) {
+        return new Object[] {a, b, null, null};
+    }
+
+    public Object[] array(Object a, Object b, Object c) {
+        return new Object[] {a, b, c, null, null};
+    }
+
+    public Object[] array(Object a, Object b, Object c, Object d) {
+        return new Object[] {a, b, c, d, null, null};
     }
 }
 
@@ -469,21 +470,20 @@ final static class PersistentNodeEditor implements INodeEditor {
         return new HashCollisionNode(null, node.hash, node.count, newArray);
     }
 
-    public INode node(int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2) {
-        if (h1 == h2) return new HashCollisionNode(null, h1, 2, new Object[] { k1, v1, k2, v2 });
-        int bit1 = bitpos(h1, shift);
-        int bit2 = bitpos(h2, shift);
-        if (bit1 == bit2) return new BitmapIndexedNode(null, bit1, 0, new Object[] { node(shift+5, h1, k1, v1, h2, k2, v2)});
-        return new BitmapIndexedNode(null, bit1 | bit2, bit1 | bit2,
-                (bit1 - bit2) < 0 ? new Object[] { k1, v1, k2, v2 } : new Object[] { k2, v2, k1, v1 });
+    public Object[] array(Object a) {
+        return new Object[] {a};
     }
 
-    public INode nest(int shift, HashCollisionNode node, int h, Object k, Object v) {
-        int bit = bitpos(h, shift);
-        int bitn = bitpos(node.hash, shift);
-        if (bit == bitn) return new BitmapIndexedNode(null, bit, 0, new Object[] { nest(shift+5, node, h, k, v) });
-        return new BitmapIndexedNode(null, bit | bitn,  bit,
-                (bit - bitn) < 0 ? new Object[] { k, v, node } : new Object[] { node, k, v });
+    public Object[] array(Object a, Object b) {
+        return new Object[] {a, b};
+    }
+
+    public Object[] array(Object a, Object b, Object c) {
+        return new Object[] {a, b, c};
+    }
+
+    public Object[] array(Object a, Object b, Object c, Object d) {
+        return new Object[] {a, b, c, d};
     }
 }
 
@@ -604,10 +604,19 @@ final static class BitmapIndexedNode implements INode{
 		editor.inc();
 		BitmapIndexedNode editable = editor.remove1(this, idx+1);
 		editable.kvbitmap ^= bit;
-        editable.array[idx] = editor.node(shift + 5, hash, key, val, hash(k), k, v);
+        editable.array[idx] = node(editor, shift + 5, hash, key, val, hash(k), k, v);
 		return editable;
 	}
 
+    private INode node(INodeEditor editor, int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2) {
+        if (h1 == h2) return new HashCollisionNode(edit, h1, 2, new Object[] { k1, v1, k2, v2 });
+        int bit1 = bitpos(h1, shift);
+        int bit2 = bitpos(h2, shift);
+        if (bit1 == bit2) return new BitmapIndexedNode(edit, bit1, 0, editor.array(node(editor, shift+5, h1, k1, v1, h2, k2, v2)));
+        return new BitmapIndexedNode(edit, bit1 | bit2, bit1 | bit2,
+                (bit1 - bit2) < 0 ? editor.array(k1, v1, k2, v2) : editor.array(k2, v2, k1, v1));
+    }
+    
 	public INode without(INodeEditor editor, int shift, int hash, Object key){
 		int bit = bitpos(hash, shift);
 		if((bitmap & bit) == 0)
@@ -693,8 +702,7 @@ final static class HashCollisionNode implements INode{
 	public INode assoc(INodeEditor editor, int shift, int hash, Object key, Object val){
         if(hash != this.hash) 
             // nest it in a bitmap node
-            return new BitmapIndexedNode(edit, bitpos(this.hash, shift), 0, new Object[] {this, null, null})
-                .assoc(editor, shift, hash, key, val);
+            return nest(editor, shift, hash, key, val);
 
         int idx = findIndex(key);
         if(idx != -1) {
@@ -712,6 +720,13 @@ final static class HashCollisionNode implements INode{
         editable.count++;
         return editable;
 	}	
+
+	private INode nest(INodeEditor editor, int shift, int h, Object k, Object v) {
+	    int bit = bitpos(h, shift);
+	    int bitn = bitpos(hash, shift);
+	    if (bit == bitn) return new BitmapIndexedNode(edit, bit, 0, editor.array(nest(editor, shift+5, h, k, v)));
+	    return new BitmapIndexedNode(edit, bit | bitn,  bit, (bit - bitn) < 0 ? editor.array(k, v, this) : editor.array(this, k, v));
+	}
 
 	public INode without(INodeEditor editor, int shift, int hash, Object key){
 		int idx = findIndex(key);
