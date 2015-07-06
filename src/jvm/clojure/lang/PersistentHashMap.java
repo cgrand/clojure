@@ -702,20 +702,26 @@ final static class BitmapIndexedNode implements INode{
                 newbitmap |= bit;
                 if ((dst.bitmap & bit) != 0) {
                     if ((this.kvbitmap & bit) != 0) {
-                        editor.dec();
                         Object key = this.array[srcidx++];
                         Object val = this.array[srcidx++];
-                        if ((dst.kvbitmap & bit) != 0) { // src kv overwrites dst kv
-                            newkvbitmap |= bit;
-                            dstidx+=2;
-                            newArray[idx++] = key;
-                            newArray[idx++] = val;
-                        } else {
-                            newArray[idx++] = ((INode) dst.array[dstidx++]).assoc(editor, shift + 5, hash(key), key, val);
+                        if ((dst.kvbitmap & bit) != 0) { 
+                            Object dstKey = dst.array[dstidx++];
+                            if (Util.equiv(key, dstKey)) { // src kv overwrites dst kv
+                                editor.dec();
+                                newkvbitmap |= bit;
+                                dstidx++;
+                                newArray[idx++] = key;
+                                newArray[idx++] = val;
+                            } else {
+                                newArray[idx++] = node(editor, shift+5, hash(key), key, val, hash(dstKey), dstKey, dst.array[dstidx++]);
+                            }
+                        } else { // kv src assoc in dst node
+                            editor.dec();
+                            newArray[idx++] = ((INode) dst.array[dstidx++]).assoc(editor, shift+5, hash(key), key, val);
                         }
                     } else {
                         INode srcnode = (INode) this.array[srcidx++];
-                        if ((dst.kvbitmap & bit) != 0) {
+                        if ((dst.kvbitmap & bit) != 0) { // src node may shadows kv dst
                             editor.dec();
                             Object key = dst.array[dstidx++];
                             Object val = dst.array[dstidx++];
