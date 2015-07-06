@@ -27,11 +27,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class PersistentHashMap extends APersistentMap implements IEditableCollection, IObj, IMapIterable {
 
-final int count;
 final INode root;
 final IPersistentMap _meta;
 
-final public static PersistentHashMap EMPTY = new PersistentHashMap(0, BitmapIndexedNode.EMPTY);
+final public static PersistentHashMap EMPTY = new PersistentHashMap(null, BitmapIndexedNode.EMPTY);
 final private static Object NOT_FOUND = new Object();
 
 static public IPersistentMap create(Map other){
@@ -98,15 +97,8 @@ public static PersistentHashMap create(IPersistentMap meta, Object... init){
 	return create(init).withMeta(meta);
 }
 
-PersistentHashMap(int count, INode root){
-	this.count = count;
-	this.root = root;
-	this._meta = null;
-}
-
-public PersistentHashMap(IPersistentMap meta, int count, INode root){
+public PersistentHashMap(IPersistentMap meta, INode root){
 	this._meta = meta;
-	this.count = count;
 	this.root = root;
 }
 
@@ -123,11 +115,10 @@ public IMapEntry entryAt(Object key){
 }
 
 public IPersistentMap assoc(Object key, Object val){
-    PersistentNodeEditor editor = new PersistentNodeEditor();
-	INode newroot = root.assoc(editor, 0, hash(key), key, val);
+	INode newroot = root.assoc(PERSISTENT_NODE_EDITOR, 0, hash(key), key, val);
 	if(newroot == root)
 		return this;
-	return new PersistentHashMap(meta(), editor.addedLeaf ? count+1 : count, newroot);
+	return new PersistentHashMap(meta(), newroot);
 }
 
 public Object valAt(Object key, Object notFound){
@@ -145,10 +136,10 @@ public IPersistentMap assocEx(Object key, Object val) {
 }
 
 public IPersistentMap without(Object key){
-	INode newroot = root.without(PersistentNodeEditor.FOR_WITHOUT, 0, hash(key), key);
+	INode newroot = root.without(PERSISTENT_NODE_EDITOR, 0, hash(key), key);
 	if(newroot == root)
 		return this;
-	return new PersistentHashMap(meta(), count - 1, newroot != null ? newroot : BitmapIndexedNode.EMPTY); 
+	return new PersistentHashMap(meta(), newroot != null ? newroot : BitmapIndexedNode.EMPTY); 
 }
 
 private Iterator iterator(final IFn f){
@@ -191,13 +182,13 @@ public Object fold(long n, final IFn combinef, final IFn reducef,
 }
 
 public Object merge(PersistentHashMap src) {
-    TransientNodeEditor editor = new TransientNodeEditor(Thread.currentThread(), 0);
+    TransientNodeEditor editor = new TransientNodeEditor(Thread.currentThread());
     INode newRoot = merge(editor, 0, this.root, src.root);
-    return new PersistentHashMap(meta(), count + src.count + editor.count, newRoot);
+    return new PersistentHashMap(meta(), newRoot);
 }
 
 public int count(){
-	return count;
+	return root.count();
 }
 
 public ISeq seq(){
@@ -214,7 +205,7 @@ static int mask(int hash, int shift){
 }
 
 public PersistentHashMap withMeta(IPersistentMap meta){
-	return new PersistentHashMap(meta, count, root);
+	return new PersistentHashMap(meta, root);
 }
 
 public TransientHashMap asTransient() {
@@ -228,16 +219,14 @@ public IPersistentMap meta(){
 static final class TransientHashMap extends ATransientMap {
 	volatile TransientNodeEditor editor;
 	volatile INode root;
-	volatile int count;
 
 	TransientHashMap(PersistentHashMap m) {
-		this(new TransientNodeEditor(Thread.currentThread(), m.count), m.root, m.count);
+		this(new TransientNodeEditor(Thread.currentThread()), m.root);
 	}
 	
-	TransientHashMap(TransientNodeEditor editor, INode root, int count) {
+	TransientHashMap(TransientNodeEditor editor, INode root) {
 		this.editor = editor;
 		this.root = root; 
-		this.count = count; 
 	}
 	
 	ITransientMap doAssoc(Object key, Object val) {
@@ -256,9 +245,8 @@ static final class TransientHashMap extends ATransientMap {
 
 	IPersistentMap doPersistent() {
 		editor.edit.set(null);
-		int count = editor.count;
 		editor = null;
-		return new PersistentHashMap(count, root);
+		return new PersistentHashMap(null, root);
 	}
 
 	Object doValAt(Object key, Object notFound) {
@@ -266,7 +254,7 @@ static final class TransientHashMap extends ATransientMap {
 	}
 
 	int doCount() {
-		return editor.count;
+		return root.count();
 	}
 	
 	void ensureEditable(){
@@ -276,6 +264,8 @@ static final class TransientHashMap extends ATransientMap {
 }
 
 static interface INode extends Serializable {
+    int count();
+    
 	IMapEntry find(int shift, int hash, Object key);
 
 	Object find(int shift, int hash, Object key, Object notFound);
@@ -304,9 +294,6 @@ static INode merge(TransientNodeEditor editor, int shift, INode dst, INode src) 
 }
 
 static interface INodeEditor {
-    void inc();
-    void dec();
-    
     BitmapIndexedNode edit(BitmapIndexedNode node);
     BitmapIndexedNode insert2(BitmapIndexedNode node, int idx);
     BitmapIndexedNode remove2(BitmapIndexedNode node, int idx);
@@ -325,24 +312,14 @@ static interface INodeEditor {
 
 final static class TransientNodeEditor implements INodeEditor {
     final AtomicReference<Thread> edit;
-    int count;
 
-    public TransientNodeEditor(Thread t, int count) {
+    public TransientNodeEditor(Thread t) {
         edit = new AtomicReference<Thread>(t);
-        this.count = count;
-    }
-    
-    public void inc() {
-        count++;
-    }
-
-    public void dec() {
-        count--;
     }
 
     public BitmapIndexedNode edit(BitmapIndexedNode node) {
         if (node.edit == edit) return node;
-        return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, node.array.clone());
+        return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, node.array.clone());
     }
 
     public BitmapIndexedNode insert1(BitmapIndexedNode node, int idx) {
@@ -354,7 +331,7 @@ final static class TransientNodeEditor implements INodeEditor {
         Object[] newArray = new Object[n + 7]; // room for growth
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx, newArray, idx+1, n-idx);
-        return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
+        return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
     }
 
     public BitmapIndexedNode insert2(BitmapIndexedNode node, int idx) {
@@ -366,7 +343,7 @@ final static class TransientNodeEditor implements INodeEditor {
         Object[] newArray = new Object[n + 8]; // room for growth
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx, newArray, idx+2, n-idx);
-        return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
+        return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
     }
 
     public BitmapIndexedNode remove2(BitmapIndexedNode node, int idx) {
@@ -375,7 +352,7 @@ final static class TransientNodeEditor implements INodeEditor {
             Object[] newArray = new Object[n];
             System.arraycopy(node.array, 0, newArray, 0, idx);
             System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
-            return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
+            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
         }
         System.arraycopy(node.array, idx+2, node.array, idx, n-idx);
         node.array[n] = node.array[n+1] = null;
@@ -388,7 +365,7 @@ final static class TransientNodeEditor implements INodeEditor {
             Object[] newArray = new Object[n];
             System.arraycopy(node.array, 0, newArray, 0, idx);
             System.arraycopy(node.array, idx+1, newArray, idx, n-idx);
-            return new BitmapIndexedNode(edit, node.bitmap, node.kvbitmap, newArray);
+            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
         }
         System.arraycopy(node.array, idx+1, node.array, idx, n-idx);
         node.array[n] = null;
@@ -437,30 +414,12 @@ final static class TransientNodeEditor implements INodeEditor {
     public Object[] array(Object a, Object b, Object c, Object d) {
         return new Object[] {a, b, c, d, null, null};
     }
-
-    public INode nest(int shift, HashCollisionNode node1, HashCollisionNode node2) {
-        int bit1 = bitpos(node1.hash, shift);
-        int bit2 = bitpos(node2.hash, shift);
-        if (bit1 == bit2) return new BitmapIndexedNode(edit, bit1, 0, new Object[] { nest(shift+5, node1, node2), null, null });
-        return new BitmapIndexedNode(edit, bit1 | bit2, 0,
-                (bit1 - bit2) < 0 ? new Object[] { node1, node2, null, null } : new Object[] { node2, node1, null, null });
-    }
 }
 
-final static class PersistentNodeEditor implements INodeEditor {
-    static final PersistentNodeEditor FOR_WITHOUT = new PersistentNodeEditor();
-    
-    boolean addedLeaf = false;
-
-    public void inc() {
-        addedLeaf = true;
-    }
-
-    public void dec() {
-    }
+final static INodeEditor PERSISTENT_NODE_EDITOR = new INodeEditor() {
     
     public BitmapIndexedNode edit(BitmapIndexedNode node) {
-        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, node.array.clone());
+        return new BitmapIndexedNode(null, node.count, node.bitmap, node.kvbitmap, node.array.clone());
     }
 
     public BitmapIndexedNode insert1(BitmapIndexedNode node, int idx) {
@@ -468,7 +427,7 @@ final static class PersistentNodeEditor implements INodeEditor {
         Object[] newArray = new Object[n + 1];
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx, newArray, idx+1, n-idx);
-        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, newArray);
+        return new BitmapIndexedNode(null, node.count, node.bitmap, node.kvbitmap, newArray);
     }
 
     public BitmapIndexedNode insert2(BitmapIndexedNode node, int idx) {
@@ -476,7 +435,7 @@ final static class PersistentNodeEditor implements INodeEditor {
         Object[] newArray = new Object[n + 2];
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx, newArray, idx+2, n-idx);
-        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, newArray);
+        return new BitmapIndexedNode(null, node.count, node.bitmap, node.kvbitmap, newArray);
     }
 
     public BitmapIndexedNode remove2(BitmapIndexedNode node, int idx) {
@@ -484,7 +443,7 @@ final static class PersistentNodeEditor implements INodeEditor {
         Object[] newArray = new Object[n];
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
-        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, newArray);
+        return new BitmapIndexedNode(null, node.count, node.bitmap, node.kvbitmap, newArray);
     }
 
     public BitmapIndexedNode remove1(BitmapIndexedNode node, int idx) {
@@ -492,7 +451,7 @@ final static class PersistentNodeEditor implements INodeEditor {
         Object[] newArray = new Object[n];
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx+1, newArray, idx, n-idx);
-        return new BitmapIndexedNode(null, node.bitmap, node.kvbitmap, newArray);
+        return new BitmapIndexedNode(null, node.count, node.bitmap, node.kvbitmap, newArray);
     }
 
     public HashCollisionNode edit(HashCollisionNode node) {
@@ -529,11 +488,12 @@ final static class PersistentNodeEditor implements INodeEditor {
     public Object[] array(Object a, Object b, Object c, Object d) {
         return new Object[] {a, b, c, d};
     }
-}
+};
 
-final static class BitmapIndexedNode implements INode{
-	static final BitmapIndexedNode EMPTY = new BitmapIndexedNode(null, 0, 0, new Object[0]);
-	
+final static class BitmapIndexedNode implements INode {
+	static final BitmapIndexedNode EMPTY = new BitmapIndexedNode(null, 0, 0, 0, new Object[0]);
+
+	int count;
 	int bitmap;
 	int kvbitmap;
 	Object[] array;
@@ -543,13 +503,14 @@ final static class BitmapIndexedNode implements INode{
 		return Integer.bitCount(bitmap & (bit - 1)) + Integer.bitCount(kvbitmap & (bit - 1));
 	}
 
-	BitmapIndexedNode(AtomicReference<Thread> edit, int bitmap, int kvbitmap, Object[] array){
-        this.bitmap = bitmap;
+	BitmapIndexedNode(AtomicReference<Thread> edit, int count, int bitmap, int kvbitmap, Object[] array){
+        this.count = count;
+	    this.bitmap = bitmap;
         this.kvbitmap = kvbitmap;
 		this.array = array;
 		this.edit = edit;
 	}
-
+	
 	public IMapEntry find(int shift, int hash, Object key){
 		int bit = bitpos(hash, shift);
 		if((bitmap & bit) == 0)
@@ -599,44 +560,34 @@ final static class BitmapIndexedNode implements INode{
 		editable.array[i] = a;
 		return editable;
 	}
-
-    private BitmapIndexedNode editAndRemovePair(INodeEditor editor, int bit, int i) {
-        if (bitmap == bit) 
-            return null;
-        BitmapIndexedNode editable = editor.remove2(this, i);
-        editable.bitmap &= ~bit;
-        editable.kvbitmap &= ~bit;
-        return editable;
-    }
-
-    private BitmapIndexedNode editAndRemoveNode(INodeEditor editor, int bit, int i) {
-        if (bitmap == bit) 
-            return null;
-        BitmapIndexedNode editable = editor.remove1(this, i);
-        editable.bitmap &= ~bit;
-        editable.kvbitmap &= ~bit;
-        return editable;
-    }
     
     public INode assoc(INodeEditor editor, int shift, int hash, Object key, Object val){
         int bit = bitpos(hash, shift);
         int idx = index(bit);
         if((bitmap & bit) == 0) {
             int n = Integer.bitCount(bitmap) + Integer.bitCount(kvbitmap);
-            editor.inc();
             BitmapIndexedNode editable = editor.insert2(this, idx);
             editable.array[idx] = key;
             editable.array[idx+1] = val;
+            editable.count++;
             editable.bitmap |= bit;
             editable.kvbitmap |= bit;
             return editable;
         }
         if((kvbitmap & bit) == 0) {
             INode node = (INode) array[idx];
+            int ncnt = node.count();
+            int rcnt = count - ncnt;
             INode n = node.assoc(editor, shift + 5, hash, key, val);
-            if(n == node)
+            if(n == node) {
+                int nncnt = n.count();
+                if (ncnt != nncnt) // if node has muted then "this" is mutable
+                    this.count = rcnt + nncnt;
                 return this;
-            return editAndSet(editor, idx, n);
+            }
+            BitmapIndexedNode editable = editAndSet(editor, idx, n);
+            editable.count = rcnt + n.count();
+            return editable;
         } 
         Object k = array[idx];
         Object v = array[idx+1];
@@ -645,8 +596,8 @@ final static class BitmapIndexedNode implements INode{
                 return this;
             return editAndSet(editor, idx+1, val);
         }
-        editor.inc();
         BitmapIndexedNode editable = editor.remove1(this, idx+1);
+        editable.count++;
         editable.kvbitmap ^= bit;
         editable.array[idx] = node(editor, shift + 5, hash, key, val, hash(k), k, v);
         return editable;
@@ -656,8 +607,8 @@ final static class BitmapIndexedNode implements INode{
         if (h1 == h2) return new HashCollisionNode(edit, h1, 2, new Object[] { k1, v1, k2, v2 });
         int bit1 = bitpos(h1, shift);
         int bit2 = bitpos(h2, shift);
-        if (bit1 == bit2) return new BitmapIndexedNode(edit, bit1, 0, editor.array(node(editor, shift+5, h1, k1, v1, h2, k2, v2)));
-        return new BitmapIndexedNode(edit, bit1 | bit2, bit1 | bit2,
+        if (bit1 == bit2) return new BitmapIndexedNode(edit, 2, bit1, 0, editor.array(node(editor, shift+5, h1, k1, v1, h2, k2, v2)));
+        return new BitmapIndexedNode(edit, 2, bit1 | bit2, bit1 | bit2,
                 (bit1 - bit2) < 0 ? editor.array(k1, v1, k2, v2) : editor.array(k2, v2, k1, v1));
     }
     
@@ -668,19 +619,37 @@ final static class BitmapIndexedNode implements INode{
 		int idx = index(bit);
         if((kvbitmap & bit) == 0) {
             INode node = (INode) array[idx];
+            int ncnt = node.count();
+            int rcnt = count - ncnt;
             INode n = node.without(editor, shift + 5, hash, key);
-            if (n == node)
-				return this;
-			if (n != null)
-				return editAndSet(editor, idx, n); 
+            if (n == node) {
+                int nncnt = n.count();
+                if (ncnt != nncnt) // if "node" has muted then "this" is mutable 
+                    this.count = rcnt + nncnt;
+                return this;
+            }
+			if (n != null) {
+                BitmapIndexedNode editable = editAndSet(editor, idx, n);
+                editable.count = rcnt + n.count();
+                return editable;
+            } 
 			if (bitmap == bit) 
 				return null;
-			return editAndRemoveNode(editor, bit, idx); 
+	        BitmapIndexedNode editable = editor.remove1(this, idx);
+            editable.count = rcnt;
+	        editable.bitmap &= ~bit;
+	        editable.kvbitmap &= ~bit;
+	        return editable;
 		}
 		if(Util.equiv(key, array[idx])) {
-		    editor.dec();
 			// TODO: collapse
-			return editAndRemovePair(editor, bit, idx); 			
+	        if (bitmap == bit) 
+	            return null;
+	        BitmapIndexedNode editable = editor.remove2(this, idx);
+            editable.count--;
+	        editable.bitmap &= ~bit;
+	        editable.kvbitmap &= ~bit;
+	        return editable;
 		}
 		return this;
 	}
@@ -695,6 +664,7 @@ final static class BitmapIndexedNode implements INode{
         int idx = 0;
         int srcidx = 0;
         int dstidx = 0;
+        int newcount = 0;
         int newbitmap = 0;
         int newkvbitmap = 0;
         for(int bit = 1; bit != 0; bit <<= 1) {
@@ -707,57 +677,69 @@ final static class BitmapIndexedNode implements INode{
                         if ((dst.kvbitmap & bit) != 0) { 
                             Object dstKey = dst.array[dstidx++];
                             if (Util.equiv(key, dstKey)) { // src kv overwrites dst kv
-                                editor.dec();
+                                newcount++;
                                 newkvbitmap |= bit;
                                 dstidx++;
                                 newArray[idx++] = key;
                                 newArray[idx++] = val;
                             } else {
+                                newcount+=2;
                                 newArray[idx++] = node(editor, shift+5, hash(key), key, val, hash(dstKey), dstKey, dst.array[dstidx++]);
                             }
                         } else { // kv src assoc in dst node
-                            editor.dec();
-                            newArray[idx++] = ((INode) dst.array[dstidx++]).assoc(editor, shift+5, hash(key), key, val);
+                            INode node = ((INode) dst.array[dstidx++]).assoc(editor, shift+5, hash(key), key, val);
+                            newArray[idx++] = node;
+                            newcount += node.count();
                         }
                     } else {
                         INode srcnode = (INode) this.array[srcidx++];
                         if ((dst.kvbitmap & bit) != 0) { // src node may shadows kv dst
-                            editor.dec();
                             Object key = dst.array[dstidx++];
                             Object val = dst.array[dstidx++];
                             int hash = hash(key);
                             if (srcnode.find(shift+5, hash, key, NOT_FOUND) == NOT_FOUND) {
-                                newArray[idx++] = srcnode.assoc(editor, shift+5, hash, key, val);
+                                INode node = srcnode.assoc(editor, shift+5, hash, key, val);
+                                newArray[idx++] = node;
+                                newcount += node.count();
                             } else {
                                 newArray[idx++] = srcnode;
+                                newcount += srcnode.count();
                             }
                         } else {
-                            newArray[idx++] = PersistentHashMap.merge(editor, shift+5, (INode) dst.array[dstidx++], srcnode);
+                            INode node = PersistentHashMap.merge(editor, shift+5, (INode) dst.array[dstidx++], srcnode);
+                            newArray[idx++] = node;
+                            newcount += node.count();
                         }
                     }
                 } else { // no dst
                     if ((this.kvbitmap & bit) != 0) {
+                        newcount++;
                         newkvbitmap |= bit;
                         newArray[idx++] = this.array[srcidx++];
                         newArray[idx++] = this.array[srcidx++];
                     } else {
-                        newArray[idx++] = this.array[srcidx++];
+                        INode node = (INode) this.array[srcidx++];
+                        newArray[idx++] = node;
+                        newcount += node.count();
                     }
                 }
             } else { // no src
                 if ((dst.bitmap & bit) != 0) {
+                    newcount++;
                     newbitmap |= bit;
                     if ((dst.kvbitmap & bit) != 0) {
                         newkvbitmap |= bit;
                         newArray[idx++] = dst.array[dstidx++];
                         newArray[idx++] = dst.array[dstidx++];
                     } else {
+                        INode node = (INode) dst.array[dstidx++];
                         newArray[idx++] = dst.array[dstidx++];
+                        newcount += node.count();
                     }
                 }
             }
         }
-        return new BitmapIndexedNode(edit, newbitmap, newkvbitmap, newArray);
+        return new BitmapIndexedNode(edit, newcount, newbitmap, newkvbitmap, newArray);
     }
 
     public INode mergeCollisionNode(TransientNodeEditor editor, int shift, HashCollisionNode dst) {
@@ -768,34 +750,41 @@ final static class BitmapIndexedNode implements INode{
         int bit = bitpos(dst.hash, shift);
         int idx = index(bit);
         if((bitmap & bit) == 0) {
-            int n = Integer.bitCount(bitmap) + Integer.bitCount(kvbitmap);
-            editor.inc();
             BitmapIndexedNode editable = editor.insert1(this, idx);
             editable.array[idx] = dst;
+            editable.count+=dst.count;
             editable.bitmap |= bit;
             return editable;
         }
         if((kvbitmap & bit) == 0) {
             INode node = (INode) array[idx];
+            int ncnt = node.count();
+            int rcnt = count - ncnt;
             INode n = srcWin ? PersistentHashMap.merge(editor, shift+5, dst, node)
                     : PersistentHashMap.merge(editor, shift+5, node, dst);
-            if(n == node)
+            int nncnt = n.count();
+            if(n == node) {
+                if (ncnt != nncnt)
+                    this.count = rcnt + nncnt;
                 return this;
-            return editAndSet(editor, idx, n);
+            }
+            BitmapIndexedNode editable = editAndSet(editor, idx, n);
+            editable.count = rcnt + nncnt;
+            return editable;
         } 
         Object k = array[idx];
         Object v = array[idx+1];
         int hash = hash(k);
-        editor.inc();
         BitmapIndexedNode editable = editor.remove1(this, idx+1);
         editable.kvbitmap ^= bit;
-        if (srcWin || dst.find(shift+5, hash, k, NOT_FOUND) == NOT_FOUND) {
-            editor.dec();
-            editable.array[idx] = dst.assoc(editor, shift+5, hash, k, v);
-        } else {
-            editable.array[idx] = dst;
-        }
+        INode node = (srcWin || dst.find(shift+5, hash, k, NOT_FOUND) == NOT_FOUND) ? dst.assoc(editor, shift+5, hash, k, v) : dst;
+        editable.array[idx] = node;
+        editable.count += node.count() - 1;
         return editable;
+    }
+
+    public int count() {
+        return count;
     }
 }
 
@@ -874,7 +863,6 @@ final static class HashCollisionNode implements INode{
             return editable1; 
         }
         
-        editor.inc();
         HashCollisionNode editable = editor.insert(this);
         editable.array[2*count] = key;
         editable.array[2*count+1] = val;
@@ -885,22 +873,21 @@ final static class HashCollisionNode implements INode{
 	private INode nest(INodeEditor editor, int shift, int h, Object k, Object v) {
 	    int bit = bitpos(h, shift);
 	    int bitthis = bitpos(hash, shift);
-	    if (bit == bitthis) return new BitmapIndexedNode(edit, bit, 0, editor.array(nest(editor, shift+5, h, k, v)));
-	    return new BitmapIndexedNode(edit, bit | bitthis,  bit, (bit - bitthis) < 0 ? editor.array(k, v, this) : editor.array(this, k, v));
+	    if (bit == bitthis) return new BitmapIndexedNode(edit, count+1, bit, 0, editor.array(nest(editor, shift+5, h, k, v)));
+	    return new BitmapIndexedNode(edit, count+1, bit | bitthis,  bit, (bit - bitthis) < 0 ? editor.array(k, v, this) : editor.array(this, k, v));
 	}
 	
     private INode nest(INodeEditor editor, int shift, HashCollisionNode node) {
         int bit = bitpos(node.hash, shift);
         int bitthis = bitpos(hash, shift);
-        if (bit == bitthis) return new BitmapIndexedNode(edit, bit, 0, editor.array(nest(editor, shift+5, node)));
-        return new BitmapIndexedNode(edit, bit | bitthis,  bit, (bit - bitthis) < 0 ? editor.array(node, this) : editor.array(this, node));
+        if (bit == bitthis) return new BitmapIndexedNode(edit, count+node.count, bit, 0, editor.array(nest(editor, shift+5, node)));
+        return new BitmapIndexedNode(edit, count+node.count, bit | bitthis,  bit, (bit - bitthis) < 0 ? editor.array(node, this) : editor.array(this, node));
     }
 
 	public INode without(INodeEditor editor, int shift, int hash, Object key){
 		int idx = findIndex(key);
 		if(idx == -1)
 			return this;
-		editor.dec();
 		if(count == 1)
 			return null;
 		HashCollisionNode editable = editor.remove(this, idx);
@@ -930,11 +917,14 @@ final static class HashCollisionNode implements INode{
                 newCount++;
                 continue;
             }
-            editor.dec(); // duplicate
             if (Util.equiv(this.array[i+1], newArray[idx+1])) continue;
             newArray[idx+1] = this.array[i+1];
         }
         return new HashCollisionNode(edit, hash, newCount, newArray);
+    }
+
+    public int count() {
+        return count;
     }
 }
 
