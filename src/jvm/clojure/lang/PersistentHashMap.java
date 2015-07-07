@@ -102,6 +102,12 @@ public PersistentHashMap(IPersistentMap meta, INode root){
 	this.root = root;
 }
 
+public IPersistentCollection cons(Object o) {
+    if (o instanceof PersistentHashMap)
+        return merge((PersistentHashMap) o);
+    return super.cons(o);
+}
+
 static int hash(Object k){
 	return Util.hasheq(k);
 }
@@ -181,7 +187,7 @@ public Object fold(long n, final IFn combinef, final IFn reducef,
 	return fjinvoke.invoke(top);
 }
 
-public Object merge(PersistentHashMap src) {
+public PersistentHashMap merge(PersistentHashMap src) {
     TransientNodeEditor editor = new TransientNodeEditor(Thread.currentThread());
     INode newRoot = merge(editor, 0, this.root, src.root);
     return new PersistentHashMap(meta(), newRoot);
@@ -668,32 +674,32 @@ final static class BitmapIndexedNode implements INode {
         int newbitmap = 0;
         int newkvbitmap = 0;
         for(int bit = 1; bit != 0; bit <<= 1) {
-            if ((this.bitmap & bit) != 0) {
+            if ((this.bitmap & bit) != 0) { // src has items
                 newbitmap |= bit;
-                if ((dst.bitmap & bit) != 0) {
-                    if ((this.kvbitmap & bit) != 0) {
+                if ((dst.bitmap & bit) != 0) {  // dst has items
+                    if ((this.kvbitmap & bit) != 0) { // src is only one entry
                         Object key = this.array[srcidx++];
                         Object val = this.array[srcidx++];
-                        if ((dst.kvbitmap & bit) != 0) { 
+                        if ((dst.kvbitmap & bit) != 0) { // dst is only one entry
                             Object dstKey = dst.array[dstidx++];
-                            if (Util.equiv(key, dstKey)) { // src kv overwrites dst kv
+                            if (Util.equiv(key, dstKey)) { // src entry overwrites dst entry
                                 newcount++;
                                 newkvbitmap |= bit;
                                 dstidx++;
                                 newArray[idx++] = key;
                                 newArray[idx++] = val;
-                            } else {
+                            } else { // keep both entries
                                 newcount+=2;
                                 newArray[idx++] = node(editor, shift+5, hash(key), key, val, hash(dstKey), dstKey, dst.array[dstidx++]);
                             }
-                        } else { // kv src assoc in dst node
+                        } else { // dst is a node, assoc src entry in it (since src overwrites dst)
                             INode node = ((INode) dst.array[dstidx++]).assoc(editor, shift+5, hash(key), key, val);
                             newArray[idx++] = node;
                             newcount += node.count();
                         }
-                    } else {
+                    } else { // src is a node
                         INode srcnode = (INode) this.array[srcidx++];
-                        if ((dst.kvbitmap & bit) != 0) { // src node may shadows kv dst
+                        if ((dst.kvbitmap & bit) != 0) { // src node may shadows dst entry
                             Object key = dst.array[dstidx++];
                             Object val = dst.array[dstidx++];
                             int hash = hash(key);
@@ -705,7 +711,7 @@ final static class BitmapIndexedNode implements INode {
                                 newArray[idx++] = srcnode;
                                 newcount += srcnode.count();
                             }
-                        } else {
+                        } else { // recursively merge
                             INode node = PersistentHashMap.merge(editor, shift+5, (INode) dst.array[dstidx++], srcnode);
                             newArray[idx++] = node;
                             newcount += node.count();
@@ -733,7 +739,7 @@ final static class BitmapIndexedNode implements INode {
                         newArray[idx++] = dst.array[dstidx++];
                     } else {
                         INode node = (INode) dst.array[dstidx++];
-                        newArray[idx++] = dst.array[dstidx++];
+                        newArray[idx++] = node;
                         newcount += node.count();
                     }
                 }

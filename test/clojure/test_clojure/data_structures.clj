@@ -1275,3 +1275,15 @@
          identity
          [^{:tag clojure.test-clojure.data-structures/gen-struct} s]
          (seq-iter-match s s))
+
+(defspec same-merged-map
+  (constantly nil)
+  [^{:tag clojure.test-clojure.data-structures/gen-map} common
+   ^{:tag clojure.test-clojure.data-structures/gen-map} left
+   ^{:tag clojure.test-clojure.data-structures/gen-map} right]
+  (let [c (if (instance? clojure.lang.PersistentHashMap common) common (into clojure.lang.PersistentHashMap/EMPTY common))
+        l (into c left)
+        r (into l right)]
+    (assert-same-collection
+     (merge l r)
+     (into l r))))
