@@ -643,8 +643,7 @@ final static class BitmapIndexedNode implements INode {
 				return null;
 	        BitmapIndexedNode editable = editor.remove1(this, idx);
             editable.count = rcnt;
-	        editable.bitmap &= ~bit;
-	        editable.kvbitmap &= ~bit;
+	        editable.bitmap ^= bit;
 	        return editable;
 		}
 		if(Util.equiv(key, array[idx])) {
@@ -653,8 +652,8 @@ final static class BitmapIndexedNode implements INode {
 	            return null;
 	        BitmapIndexedNode editable = editor.remove2(this, idx);
             editable.count--;
-	        editable.bitmap &= ~bit;
-	        editable.kvbitmap &= ~bit;
+	        editable.bitmap ^= bit;
+	        editable.kvbitmap ^= bit;
 	        return editable;
 		}
 		return this;
@@ -915,7 +914,7 @@ final static class HashCollisionNode implements INode{
         int max = dst.count*2;
         int newCount = dst.count;
         System.arraycopy(dst.array, 0, newArray, 0, max);
-        for(int i = 0; i < this.count*2; i=+2) {
+        for(int i = 0; i < this.count*2; i+=2) {
             int idx = findIndex(newArray, this.array[i], max);
             if (idx < 0) {
                 newArray[newCount*2] = this.array[i]; 
