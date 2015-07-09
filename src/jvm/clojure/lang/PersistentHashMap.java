@@ -330,26 +330,40 @@ final static class TransientNodeEditor implements INodeEditor {
 
     public BitmapIndexedNode insert1(BitmapIndexedNode node, int idx) {
         int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap);
-        if (node.edit == edit && node.array.length >= n + 1) {
+        if (node.edit != edit)
+            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, grow1(node.array, idx, n));
+        if (node.array.length >= n + 1) {
             System.arraycopy(node.array, idx, node.array, idx+1, n-idx);
-            return node;
+        } else {
+            node.array = grow1(node.array, idx, n);
         }
+        return node;
+    }
+
+    static Object[] grow1(Object[] array, int idx, int n) {
         Object[] newArray = new Object[n + 7]; // room for growth
-        System.arraycopy(node.array, 0, newArray, 0, idx);
-        System.arraycopy(node.array, idx, newArray, idx+1, n-idx);
-        return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
+        System.arraycopy(array, 0, newArray, 0, idx);
+        System.arraycopy(array, idx, newArray, idx+1, n-idx);
+        return newArray;
     }
 
     public BitmapIndexedNode insert2(BitmapIndexedNode node, int idx) {
         int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap);
-        if (node.edit == edit && node.array.length >= n + 2) {
+        if (node.edit != edit)
+            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, grow2(node.array, idx, n));
+        if (node.array.length >= n + 2) {
             System.arraycopy(node.array, idx, node.array, idx+2, n-idx);
-            return node;
+        } else {
+            node.array = grow2(node.array, idx, n);
         }
+        return node;
+    }
+
+    private Object[] grow2(Object[] array, int idx, int n) {
         Object[] newArray = new Object[n + 8]; // room for growth
-        System.arraycopy(node.array, 0, newArray, 0, idx);
-        System.arraycopy(node.array, idx, newArray, idx+2, n-idx);
-        return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
+        System.arraycopy(array, 0, newArray, 0, idx);
+        System.arraycopy(array, idx, newArray, idx+2, n-idx);
+        return newArray;
     }
 
     public BitmapIndexedNode remove2(BitmapIndexedNode node, int idx) {
@@ -641,7 +655,7 @@ final static class BitmapIndexedNode implements INode {
             } 
 			if (bitmap == bit) 
 				return null;
-	        BitmapIndexedNode editable = editor.remove1(this, idx);
+			BitmapIndexedNode editable = editor.remove1(this, idx);
             editable.count = rcnt;
 	        editable.bitmap ^= bit;
 	        return editable;
