@@ -145,7 +145,7 @@ public IPersistentMap without(Object key){
 	INode newroot = root.without(PERSISTENT_NODE_EDITOR, 0, hash(key), key);
 	if(newroot == root)
 		return this;
-	return new PersistentHashMap(meta(), newroot != null ? newroot : BitmapIndexedNode.EMPTY); 
+	return new PersistentHashMap(meta(), newroot); 
 }
 
 private Iterator iterator(final IFn f){
@@ -245,7 +245,7 @@ static final class TransientHashMap extends ATransientMap {
 	ITransientMap doWithout(Object key) {
 		INode n = root.without(editor, 0, hash(key), key);
 		if (n != root)
-			this.root = n != null ? n : BitmapIndexedNode.EMPTY;
+			this.root = n;
 		return this;
 	}
 
@@ -642,28 +642,25 @@ final static class BitmapIndexedNode implements INode {
             int ncnt = node.count();
             int rcnt = count - ncnt;
             INode n = node.without(editor, shift + 5, hash, key);
-            if (n == node) {
-                int nncnt = n.count();
-                if (ncnt != nncnt) // if "node" has muted then "this" is mutable 
-                    this.count = rcnt + nncnt;
+            int nncnt = n.count();
+            if (ncnt == nncnt)
                 return this;
-            }
-			if (n != null) {
-                BitmapIndexedNode editable = editAndSet(editor, idx, n);
+            if (nncnt != 0) {
+                BitmapIndexedNode editable = node != n ? editAndSet(editor, idx, n) : this;
                 editable.count = rcnt + n.count();
                 return editable;
-            } 
-			if (bitmap == bit) 
-				return null;
-			BitmapIndexedNode editable = editor.remove1(this, idx);
+            }
+            if (bitmap == bit) 
+                return n; // n is empty
+            BitmapIndexedNode editable = editor.remove1(this, idx);
             editable.count = rcnt;
-	        editable.bitmap ^= bit;
-	        return editable;
+            editable.bitmap ^= bit;
+            return editable;
 		}
 		if(Util.equiv(key, array[idx])) {
 			// TODO: collapse
 	        if (bitmap == bit) 
-	            return null;
+	            return EMPTY;
 	        BitmapIndexedNode editable = editor.remove2(this, idx);
             editable.count--;
 	        editable.bitmap ^= bit;
@@ -908,7 +905,7 @@ final static class HashCollisionNode implements INode{
 		if(idx == -1)
 			return this;
 		if(count == 1)
-			return null;
+			return BitmapIndexedNode.EMPTY;
 		HashCollisionNode editable = editor.remove(this, idx);
 		editable.count--;
 		return editable;
