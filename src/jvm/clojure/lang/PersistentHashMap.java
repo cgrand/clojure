@@ -15,6 +15,8 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 
+import clojure.lang.PersistentHashMap.BitmapIndexedNode;
+
 /*
  A persistent rendition of Phil Bagwell's Hash Array Mapped Trie
 
@@ -359,7 +361,7 @@ final static class TransientNodeEditor implements INodeEditor {
         return node;
     }
 
-    private Object[] grow2(Object[] array, int idx, int n) {
+    static Object[] grow2(Object[] array, int idx, int n) {
         Object[] newArray = new Object[n + 8]; // room for growth
         System.arraycopy(array, 0, newArray, 0, idx);
         System.arraycopy(array, idx, newArray, idx+2, n-idx);
@@ -367,29 +369,43 @@ final static class TransientNodeEditor implements INodeEditor {
     }
 
     public BitmapIndexedNode remove2(BitmapIndexedNode node, int idx) {
-        int n = node.array.length-2;
-        if (node.edit != edit) {
-            Object[] newArray = new Object[n];
-            System.arraycopy(node.array, 0, newArray, 0, idx);
-            System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
-            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
+        int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap) - 2;
+        if (node.edit != edit)
+            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, shrink2(node.array, idx, n));
+        if (node.array.length > n + 8) {
+            node.array = shrink2(node.array, idx, n);
+        } else {
+            System.arraycopy(node.array, idx+2, node.array, idx, n-idx);
+            node.array[n] = node.array[n+1] = null;            
         }
-        System.arraycopy(node.array, idx+2, node.array, idx, n-idx);
-        node.array[n] = node.array[n+1] = null;
         return node;
     }
 
+    static Object[] shrink2(Object[] array, int idx, int n) {
+        Object[] newArray = new Object[n];
+        System.arraycopy(array, 0, newArray, 0, idx);
+        System.arraycopy(array, idx+2, newArray, idx, n-idx);
+        return newArray;
+    }
+
     public BitmapIndexedNode remove1(BitmapIndexedNode node, int idx) {
-        int n = node.array.length-1;
-        if (node.edit != edit) {
-            Object[] newArray = new Object[n];
-            System.arraycopy(node.array, 0, newArray, 0, idx);
-            System.arraycopy(node.array, idx+1, newArray, idx, n-idx);
-            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, newArray);
+        int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap) - 1;
+        if (node.edit != edit)
+            return new BitmapIndexedNode(edit, node.count, node.bitmap, node.kvbitmap, shrink1(node.array, idx, n));
+        if (node.array.length > n + 8) {
+            node.array = shrink1(node.array, idx, n);
+        } else {
+            System.arraycopy(node.array, idx+1, node.array, idx, n-idx);
+            node.array[n] = null;
         }
-        System.arraycopy(node.array, idx+1, node.array, idx, n-idx);
-        node.array[n] = null;
         return node;
+    }
+
+    static Object[] shrink1(Object[] array, int idx, int n) {
+        Object[] newArray = new Object[n];
+        System.arraycopy(array, 0, newArray, 0, idx);
+        System.arraycopy(array, idx+1, newArray, idx, n-idx);
+        return newArray;
     }
 
     public HashCollisionNode edit(HashCollisionNode node) {
@@ -459,7 +475,7 @@ final static INodeEditor PERSISTENT_NODE_EDITOR = new INodeEditor() {
     }
 
     public BitmapIndexedNode remove2(BitmapIndexedNode node, int idx) {
-        int n = node.array.length-2;
+        int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap) - 2;
         Object[] newArray = new Object[n];
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
@@ -467,7 +483,7 @@ final static INodeEditor PERSISTENT_NODE_EDITOR = new INodeEditor() {
     }
 
     public BitmapIndexedNode remove1(BitmapIndexedNode node, int idx) {
-        int n = node.array.length-1;
+        int n = Integer.bitCount(node.bitmap) + Integer.bitCount(node.kvbitmap) - 1;
         Object[] newArray = new Object[n];
         System.arraycopy(node.array, 0, newArray, 0, idx);
         System.arraycopy(node.array, idx+1, newArray, idx, n-idx);
@@ -597,16 +613,15 @@ final static class BitmapIndexedNode implements INode {
         if((kvbitmap & bit) == 0) {
             INode node = (INode) array[idx];
             int ncnt = node.count();
-            int rcnt = count - ncnt;
             INode n = node.assoc(editor, shift + 5, hash, key, val);
             if(n == node) {
                 int nncnt = n.count();
                 if (ncnt != nncnt) // if node has muted then "this" is mutable
-                    this.count = rcnt + nncnt;
+                    this.count++;
                 return this;
             }
             BitmapIndexedNode editable = editAndSet(editor, idx, n);
-            editable.count = rcnt + n.count();
+            editable.count += n.count() - ncnt;
             return editable;
         } 
         Object k = array[idx];
@@ -640,21 +655,20 @@ final static class BitmapIndexedNode implements INode {
         if((kvbitmap & bit) == 0) {
             INode node = (INode) array[idx];
             int ncnt = node.count();
-            int rcnt = count - ncnt;
             INode n = node.without(editor, shift + 5, hash, key);
             int nncnt = n.count();
             if (ncnt == nncnt)
                 return this;
             if (nncnt != 0) {
-                BitmapIndexedNode editable = node != n ? editAndSet(editor, idx, n) : this;
-                editable.count = rcnt + n.count();
+                BitmapIndexedNode editable = editAndSet(editor, idx, n);
+                editable.count--;
                 return editable;
             }
             if (bitmap == bit) 
                 return n; // n is empty
             BitmapIndexedNode editable = editor.remove1(this, idx);
-            editable.count = rcnt;
             editable.bitmap ^= bit;
+            editable.count--;
             return editable;
 		}
 		if(Util.equiv(key, array[idx])) {
