@@ -318,6 +318,12 @@ static interface INodeEditor {
     BitmapIndexedNode insert1(BitmapIndexedNode node, int idx);
 }
 
+static private Object[] dup(Object[] a) {
+    Object[] b = new Object[a.length];
+    System.arraycopy(a, 0, b, 0, a.length);
+    return b;
+}
+
 final static class TransientNodeEditor implements INodeEditor {
     final AtomicReference<Thread> edit;
 
@@ -327,7 +333,7 @@ final static class TransientNodeEditor implements INodeEditor {
 
     public BitmapIndexedNode edit(BitmapIndexedNode node) {
         if (node.edit == edit) return node;
-        return new BitmapIndexedNode(edit, node.count, node.bitmap1, node.array.clone());
+        return new BitmapIndexedNode(edit, node.count, node.bitmap1, dup(node.array));
     }
 
     public BitmapIndexedNode insert1(BitmapIndexedNode node, int idx) {
@@ -410,7 +416,7 @@ final static class TransientNodeEditor implements INodeEditor {
 
     public HashCollisionNode edit(HashCollisionNode node) {
         if (node.edit == edit) return node;
-        return new HashCollisionNode(edit, node.hash, node.count, node.array.clone());
+        return new HashCollisionNode(edit, node.hash, node.count, dup(node.array));
     }
 
     public HashCollisionNode insert(HashCollisionNode node) {
@@ -425,8 +431,11 @@ final static class TransientNodeEditor implements INodeEditor {
         int n = node.array.length-2;
         if (node.edit != edit) {
             Object[] newArray = new Object[n];
-            System.arraycopy(node.array, 0, newArray, 0, idx);
-            System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
+            System.arraycopy(node.array, 0, newArray, 0, n);
+            if (idx < n) {
+                newArray[idx] = node.array[n];
+                newArray[idx+1] = node.array[n+1];
+            }
             return new HashCollisionNode(edit, node.hash, node.count, newArray);
         }
         node.array[idx] = node.array[n];
@@ -455,7 +464,7 @@ final static class TransientNodeEditor implements INodeEditor {
 final static INodeEditor PERSISTENT_NODE_EDITOR = new INodeEditor() {
     
     public BitmapIndexedNode edit(BitmapIndexedNode node) {
-        return new BitmapIndexedNode(null, node.count, node.bitmap1, node.array.clone());
+        return new BitmapIndexedNode(null, node.count, node.bitmap1, dup(node.array));
     }
 
     public BitmapIndexedNode insert1(BitmapIndexedNode node, int idx) {
@@ -491,7 +500,7 @@ final static INodeEditor PERSISTENT_NODE_EDITOR = new INodeEditor() {
     }
 
     public HashCollisionNode edit(HashCollisionNode node) {
-        return new HashCollisionNode(null, node.hash, node.count, node.array.clone());
+        return new HashCollisionNode(null, node.hash, node.count, dup(node.array));
     }
 
     public HashCollisionNode insert(HashCollisionNode node) {
@@ -504,8 +513,11 @@ final static INodeEditor PERSISTENT_NODE_EDITOR = new INodeEditor() {
     public HashCollisionNode remove(HashCollisionNode node, int idx) {
         int n = node.array.length-2;
         Object[] newArray = new Object[n];
-        System.arraycopy(node.array, 0, newArray, 0, idx);
-        System.arraycopy(node.array, idx+2, newArray, idx, n-idx);
+        System.arraycopy(node.array, 0, newArray, 0, n);
+        if (idx < n) {
+            newArray[idx] = node.array[n];
+            newArray[idx+1] = node.array[n+1];
+        }
         return new HashCollisionNode(null, node.hash, node.count, newArray);
     }
 
@@ -549,34 +561,33 @@ final static class BitmapIndexedNode implements Serializable {
 		int bidx = bitsidx(hash, shift);
 		long shifted = bitmap1 >>> bidx;
 		long type = shifted & 3; 
-		if (type == 0) return null;
-        if (type == 1) return ((BitmapIndexedNode) array[Long.bitCount(shifted) - 1]).find(shift + 5, hash, key);
-		if (type == 3) {
-	        int idx = Long.bitCount(shifted) - 2;
-	        Object k = array[idx];
-	        if(Util.equiv(key, k))
-	            return new MapEntry(k, array[idx+1]);
-	        return null;
-		}
-        // type == 2
-		return ((HashCollisionNode) array[Long.bitCount(shifted) - 1]).find(hash, key);
+		if (type == 0L) return null;
+        int idx = Long.bitCount(shifted ^ type);
+        Object nodeOrKey = array[idx];
+        if (--type == 0L)
+            return ((BitmapIndexedNode) nodeOrKey).find(shift + 5, hash, key);
+        if (--type == 0L)
+            return ((HashCollisionNode) nodeOrKey).find(hash, key);
+        if(Util.equiv(key, nodeOrKey))
+            return new MapEntry(nodeOrKey, array[idx+1]);
+        return null;
 	}
 
 	public Object find(int shift, int hash, Object key, Object notFound){
-        long bidx = bitsidx(hash, shift);
+        int bidx = bitsidx(hash, shift);
+        if (bitmap1 == 0x5555555555555555L)
+            return ((BitmapIndexedNode) array[(bidx >> 1) ^ 31]).find(shift + 5, hash, key, notFound);            
         long shifted = bitmap1 >>> bidx;
-        long type = shifted & 3; 
-        if (type == 0) return notFound;
-        if (type == 1) return ((BitmapIndexedNode) array[Long.bitCount(shifted) - 1]).find(shift + 5, hash, key, notFound);
-        if (type == 3) {
-            int idx = Long.bitCount(shifted) - 2;
-            Object k = array[idx];
-            if(Util.equiv(key, k))
-                return array[idx+1];
-            return notFound;
-        }
-        // (type == 2)
-        return ((HashCollisionNode) array[Long.bitCount(shifted) - 1]).find(hash, key, notFound);
+        long type = shifted & 3L; 
+        int idx = Long.bitCount(shifted ^ type);
+        if (type == 0L) return notFound;
+        Object nodeOrKey = array[idx];
+        if (--type == 0L) return ((BitmapIndexedNode) nodeOrKey).find(shift + 5, hash, key, notFound);
+        if (--type == 0L) return  ((HashCollisionNode) nodeOrKey).find(hash, key, notFound);
+        Object v = array[idx+1];
+        if(Util.equiv(key, nodeOrKey))
+            return v;
+        return notFound;
 	}
 
 	public ISeq nodeSeq(){
@@ -604,10 +615,12 @@ final static class BitmapIndexedNode implements Serializable {
     public BitmapIndexedNode assoc(INodeEditor editor, int shift, int hash, Object key, Object val){
         int bidx = bitsidx(hash, shift);
         long bitmap1 = this.bitmap1;
+        if (bitmap1 == 0x5555555555555555L)
+            return bmassoc(editor, shift, hash, key, val, (bidx >> 1) ^ 31);
         long shifted = bitmap1 >>> bidx;
         long type = shifted & 3; 
-        int idx = Long.bitCount(shifted);
-        if (type == 0) {
+        int idx = Long.bitCount(shifted ^ type);
+        if (type == 0L) {
             BitmapIndexedNode editable = editor.insert2(this, idx);            
             editable.array[idx] = key;
             editable.array[idx+1] = val;
@@ -615,54 +628,55 @@ final static class BitmapIndexedNode implements Serializable {
             editable.bitmap1 = bitmap1 | (3L << bidx);
             return editable;
         }
-        if (type == 1) {
-            --idx;
-            BitmapIndexedNode node = (BitmapIndexedNode) array[idx];
-            int nd = node.count; // negative delta
-            BitmapIndexedNode n = node.assoc(editor, shift + 5, hash, key, val);
-            nd -= n.count;
-            if (nd == 0 && n == node) return this;
-            BitmapIndexedNode editable = editAndSet(editor, idx, n);
-            editable.count -= nd;
-            return editable;            
+        if (--type == 0L) {
+            return bmassoc(editor, shift, hash, key, val, idx);            
         }
-        if (type == 3) {
-            idx -= 2;
-            Object k = array[idx];
-            Object v = array[idx+1];
-            if(Util.equiv(key, k)) {
-                if(val == v) return this;
-                BitmapIndexedNode editable = editAndSet(editor, idx+1, val);
+        if (--type == 0L) {
+            HashCollisionNode node = (HashCollisionNode) array[idx];
+            if (hash == node.hash) {
+                int nd = node.count; // negative delta
+                HashCollisionNode n = node.assoc(editor, hash, key, val);
+                nd -= n.count;
+                if (nd == 0 && n == node) return this; // avoid dummy writes
+                BitmapIndexedNode editable = editAndSet(editor, idx, n);
+                editable.count -= nd;
                 return editable;
             }
-            BitmapIndexedNode editable = editor.remove1(this, idx+1);
+            BitmapIndexedNode editable = editAndSet(editor, idx, nest(editor, node, shift + 5, hash, key, val));
             editable.count++;
-            int hashk = hash(k);
-            if (hashk == hash) {
-                editable.bitmap1 = bitmap1 ^ (1L << bidx);
-                editable.array[idx] = new HashCollisionNode(edit, hash, 2, new Object[] { key, val, k, v });
-            } else {
-                editable.bitmap1 = bitmap1 ^ (2L << bidx);
-                editable.array[idx] = node(editor, shift + 5, hash, key, val, hashk, k, v);                
-            }
+            editable.bitmap1 = bitmap1 ^ (3L << bidx);
+            return editable;            
+        }
+        Object k = array[idx];
+        Object v = array[idx+1];
+        if(Util.equiv(key, k)) {
+            if(val == v) return this;
+            BitmapIndexedNode editable = editAndSet(editor, idx+1, val);
             return editable;
         }
-        // (type == 2)
-        --idx;
-        HashCollisionNode node = (HashCollisionNode) array[idx];
-        if (hash == node.hash) {
-            int nd = node.count; // negative delta
-            HashCollisionNode n = node.assoc(editor, hash, key, val);
-            nd -= n.count;
-            if (nd == 0 && n == node) return this; // avoid dummy writes
-            BitmapIndexedNode editable = editAndSet(editor, idx, n);
-            editable.count -= nd;
-            return editable;
-        }
-        BitmapIndexedNode editable = editAndSet(editor, idx, nest(editor, node, shift + 5, hash, key, val));
+        BitmapIndexedNode editable = editor.remove1(this, idx+1);
         editable.count++;
-        editable.bitmap1 = bitmap1 ^ (3L << bidx);
-        return editable;            
+        int hashk = hash(k);
+        if (hashk == hash) {
+            editable.bitmap1 = bitmap1 ^ (1L << bidx);
+            editable.array[idx] = new HashCollisionNode(edit, hash, 2, new Object[] { key, val, k, v });
+        } else {
+            editable.bitmap1 = bitmap1 ^ (2L << bidx);
+            editable.array[idx] = node(editor, shift + 5, hash, key, val, hashk, k, v);                
+        }
+        return editable;
+    }
+
+    private BitmapIndexedNode bmassoc(INodeEditor editor, int shift, int hash,
+            Object key, Object val, int idx) {
+        BitmapIndexedNode node = (BitmapIndexedNode) array[idx];
+        int nd = node.count; // negative delta
+        BitmapIndexedNode n = node.assoc(editor, shift + 5, hash, key, val);
+        nd -= n.count;
+        if (nd == 0 && n == node) return this;
+        BitmapIndexedNode editable = editAndSet(editor, idx, n);
+        editable.count -= nd;
+        return editable;
     }
 
     private BitmapIndexedNode node(INodeEditor editor, int shift, int h1, Object k1, Object v1, int h2, Object k2, Object v2) {
@@ -677,44 +691,50 @@ final static class BitmapIndexedNode implements Serializable {
 	public BitmapIndexedNode without(INodeEditor editor, int shift, int hash, Object key){
         int bidx = bitsidx(hash, shift);
         long bitmap1 = this.bitmap1;
+        if (bitmap1 == 0x5555555555555555L) {
+            int idx = (bidx >> 1) ^ 31;
+            return bmwithout(editor, shift, hash, key, bidx, idx, array[idx]);
+        }
         long shifted = bitmap1 >>> bidx;
         long type = shifted & 3; 
-        if (type == 0) return this;
-        int idx = Long.bitCount(shifted);
-        if (type == 1) {
-            idx--;
-            BitmapIndexedNode node = (BitmapIndexedNode) array[idx];
+        if (type == 0L) return this;
+        int idx = Long.bitCount(shifted ^ type);
+        Object nodeOrKey = array[idx];
+        if (--type == 0L) {
+            return bmwithout(editor, shift, hash, key, bidx, idx, nodeOrKey);
+        }
+        if (--type == 0L) {
+            HashCollisionNode node = (HashCollisionNode) nodeOrKey;
             int nd = node.count; // if nd == 2 
-            if (nd == 2) return node.withoutOrCollapse(editor, shift + 5, hash, key, this, idx, bidx);
-            BitmapIndexedNode n = node.without(editor, shift + 5, hash, key);
+            if (nd == 2) return node.withoutOrCollapse(editor, hash, key, this, idx, bidx);
+            HashCollisionNode n = node.without(editor, hash, key);
             nd -= n.count;
             if (nd == 0) return this;
             BitmapIndexedNode editable = editAndSet(editor, idx, n);
             editable.count -= nd;
             return editable;
         }
-        if (type == 3) {
-            idx-=2;
-            if(!Util.equiv(key, array[idx])) return this;
-            BitmapIndexedNode editable = editor.remove2(this, idx);
-            editable.bitmap1 = bitmap1 ^ (type << bidx);
-            // if there's only one collision node left it should be reparented -- or not, hashcollisionnode may be a not so useful optimization:
-            // if there's a near collision (only the last bits differ) a full branch is created, if there's a collision it's optimized.
-            editable.count--;
-            return editable;
-        }
-        // type == 2
-        idx--;
-        HashCollisionNode node = (HashCollisionNode) array[idx];
+        if(!Util.equiv(key, nodeOrKey)) return this;
+        BitmapIndexedNode editable = editor.remove2(this, idx);
+        editable.bitmap1 = bitmap1 ^ (3L << bidx);
+        // if there's only one collision node left it should be reparented -- or not, hashcollisionnode may be a not so useful optimization:
+        // if there's a near collision (only the last bits differ) a full branch is created, if there's a collision it's optimized.
+        editable.count--;
+        return editable;
+	}
+
+    private BitmapIndexedNode bmwithout(INodeEditor editor, int shift,
+            int hash, Object key, int bidx, int idx, Object nodeOrKey) {
+        BitmapIndexedNode node = (BitmapIndexedNode) nodeOrKey;
         int nd = node.count; // if nd == 2 
-        if (nd == 2) return node.withoutOrCollapse(editor, hash, key, this, idx, bidx);
-        HashCollisionNode n = node.without(editor, hash, key);
+        if (nd == 2) return node.withoutOrCollapse(editor, shift + 5, hash, key, this, idx, bidx);
+        BitmapIndexedNode n = node.without(editor, shift + 5, hash, key);
         nd -= n.count;
         if (nd == 0) return this;
         BitmapIndexedNode editable = editAndSet(editor, idx, n);
         editable.count -= nd;
         return editable;
-	}
+    }
 
 	// return the edited parent
     public BitmapIndexedNode withoutOrCollapse(INodeEditor editor, int shift, int hash, Object key, BitmapIndexedNode parent, int pidx, int pbidx) {
@@ -722,23 +742,19 @@ final static class BitmapIndexedNode implements Serializable {
         long bitmap1 = this.bitmap1;
         long shifted = bitmap1 >>> bidx;
         long type = shifted & 3; 
-        if (type == 0) return parent;
-        int idx = Long.bitCount(shifted);
-        if (type == 1) { // nd is necessarily 2 here
-            idx--;
-            BitmapIndexedNode node = (BitmapIndexedNode) array[idx];
+        if (type == 0L) return parent;
+        int idx = Long.bitCount(shifted ^ type);
+        Object nodeOrKey = array[idx];
+        if (--type == 0L) { // nd is necessarily 2 here
+            BitmapIndexedNode node = (BitmapIndexedNode) nodeOrKey;
             return node.withoutOrCollapse(editor, shift + 5, hash, key, parent, pidx, pbidx);
         }
-        if (type == 3) {
-            idx-=2;
-            Object k = array[idx];
-            if(!Util.equiv(key, k)) return parent;
-            return collapse(array, idx, editor, parent, pidx, pbidx);
+        if (--type == 0L) {
+            HashCollisionNode node = (HashCollisionNode) nodeOrKey;
+            return node.withoutOrCollapse(editor, hash, key, parent, pidx, pbidx);
         }
-        // type == 2
-        idx--;
-        HashCollisionNode node = (HashCollisionNode) array[idx];
-        return node.withoutOrCollapse(editor, hash, key, parent, pidx, pbidx);
+        if(!Util.equiv(key, nodeOrKey)) return parent;
+        return collapse(array, idx, editor, parent, pidx, pbidx);
     } 
 
 //    public INode merge(TransientNodeEditor editor, int shift, INode src) {
@@ -1182,17 +1198,16 @@ static final class NodeIter implements Iterator {
         for (;bitmap1 != 0; bitmap1 >>>= 2)
         {
             long type = bitmap1 & 3;
-            if (type == 0) continue;
-            if (type == 3)
+            if (type == 0L) continue;
+            if (type == 3L)
             {
-                Object key = array[i-1];
-                Object val = array[i];
-                i -= 2;
+                Object val = array[i--];
+                Object key = array[i--];
                 bitmap1 >>>= 2;
                 nextEntry = f.invoke(key, val);
                 return true;
             }
-            Iterator iter = (type == 1) ? ((BitmapIndexedNode) array[i]).iterator(f) : ((HashCollisionNode) array[i]).iterator(f);
+            Iterator iter = (type == 1L) ? ((BitmapIndexedNode) array[i]).iterator(f) : ((HashCollisionNode) array[i]).iterator(f);
             i-=1;
             if(iter != null && iter.hasNext())
             {
@@ -1270,10 +1285,10 @@ static final class NodeSeq extends ASeq {
 			return new NodeSeq(null, array, i, s, bitmap1);
 		for(; bitmap1 != 0; bitmap1 >>>= 2) {
 		    long type = bitmap1 & 3;
-            if (type == 0) continue;
-			if (type == 3)
+            if (type == 0L) continue;
+			if (type == 3L)
 				return new NodeSeq(null, array, i, null, bitmap1 >>> 2);
-			ISeq nodeSeq = (type == 1) ? ((BitmapIndexedNode) array[i]).nodeSeq() : ((HashCollisionNode) array[i]).nodeSeq();
+			ISeq nodeSeq = (type == 1L) ? ((BitmapIndexedNode) array[i]).nodeSeq() : ((HashCollisionNode) array[i]).nodeSeq();
 			if(nodeSeq != null)
 			    return new NodeSeq(null, array, i-1, nodeSeq, bitmap1 >>> 2);
 			i--; // empty seq for child node, should not happen
