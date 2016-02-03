@@ -2,10 +2,8 @@ package clojure.lang;
 
 import java.util.Iterator;
 
-import com.sun.javafx.Utils;
-
 public class PersistentHashMapKVMono extends APersistentMap {
-    static public /**/ class Node {
+    static public /**/ final class Node {
         public /**/ long bitmap;
         public /**/ Object array[];
         public /**/ int count;
@@ -19,7 +17,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
         static final Node EMPTY = new Node(0L, new Object[0], 0); 
     }
     
-    static private class Collisions {
+    static public /**/ final class Collisions {
         int count;
         int hash;
         Object array[];
@@ -187,7 +185,6 @@ public class PersistentHashMapKVMono extends APersistentMap {
     public Object valAt(Object key, Object notFound) {
         int hash = Util.hasheq(key);
         int h = hash;
-        int lvl = 7;
         Node node = root;
         loop: for (;;) {
             int shift = (h & 31)*2;
@@ -198,7 +195,6 @@ public class PersistentHashMapKVMono extends APersistentMap {
             case 0:
                 return notFound;
             case 1:
-                if (--lvl == 0) break loop;
                 h >>>= 5;
                 node = (Node) node.array[pos-1];
                 continue loop;
@@ -209,6 +205,5 @@ public class PersistentHashMapKVMono extends APersistentMap {
                 return notFound;
             }
         }
-        throw new IllegalStateException();
     }
 }
