@@ -3,7 +3,7 @@ package clojure.lang;
 import java.util.Iterator;
 
 public class PersistentHashMapKVMono extends APersistentMap {
-    static public /**/ final class Node {
+    static private final class Node {
         static class Seq extends ASeq {
             final long bitmap;
             final Object[] array;
@@ -55,9 +55,9 @@ public class PersistentHashMapKVMono extends APersistentMap {
             
         }
 
-        public /**/ long bitmap;
-        public /**/ Object array[];
-        public /**/ int count;
+        private long bitmap;
+        private Object array[];
+        private int count;
 
         Node(long bitmap, Object[] array, int count) {
             this.bitmap = bitmap;
@@ -184,7 +184,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
         } 
     }
     
-    static public /**/ final class Collisions {
+    static private final class Collisions {
         
         static class Seq extends ASeq {
             final Object[] array;
@@ -286,7 +286,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
         }
     }
     
-    public /**/ Node root;
+    private Node root;
     
     public PersistentHashMapKVMono(Node root) {
         this.root = root;
