@@ -4,6 +4,57 @@ import java.util.Iterator;
 
 public class PersistentHashMapKVMono extends APersistentMap {
     static public /**/ final class Node {
+        static class Seq extends ASeq {
+            final long bitmap;
+            final Object[] array;
+            final ISeq nexts;
+            final int lvl;
+            
+            private static ISeq create(long bitmap, Object[] array, ISeq nexts, int lvl) {
+                while (bitmap != 0L) {
+                    switch ((int) (bitmap & 3L)) {
+                    case 0: 
+                        bitmap >>>= Long.numberOfTrailingZeros(bitmap) & -2;
+                        break;
+                    case 3:
+                        return new Seq(null, bitmap >>> 2, array, nexts, lvl);
+                    default:
+                        Object object = array[Long.bitCount(bitmap) - 1];
+                        nexts = lvl == 0 ? Collisions.Seq.create(object, nexts) : Node.Seq.create(object, nexts, lvl-1);
+                        bitmap >>>= 2;
+                    }
+                }
+                return nexts;
+            }
+
+            static ISeq create(Object node_, ISeq nexts, int lvl) {
+                Node child = (Node) node_;
+                return create(child.bitmap, child.array, nexts, lvl);
+            }
+            
+            private Seq(IPersistentMap meta, long bitmap, Object[] array, ISeq nexts, int lvl) {
+                super(meta);
+                this.bitmap = bitmap;
+                this.array = array;
+                this.nexts = nexts;
+                this.lvl = lvl;
+            }
+        
+            public Object first() {
+                int pos = Long.bitCount(bitmap);
+                return new MapEntry(array[pos], array[pos+1]);
+            }
+        
+            public ISeq next() {
+                return create(bitmap, array, nexts, lvl);
+            }
+        
+            public Obj withMeta(IPersistentMap meta) {
+                return new Seq(meta, bitmap, array, nexts, lvl);
+            }
+            
+        }
+
         public /**/ long bitmap;
         public /**/ Object array[];
         public /**/ int count;
@@ -134,6 +185,43 @@ public class PersistentHashMapKVMono extends APersistentMap {
     }
     
     static public /**/ final class Collisions {
+        
+        static class Seq extends ASeq {
+            final Object[] array;
+            final int idx;
+            final ISeq nexts;
+
+            static ISeq create(Object collisions_, ISeq nexts) {
+                Collisions child = (Collisions) collisions_;
+                return Collisions.Seq.create(child.array, (child.count-1)*2, nexts);
+            }
+            
+            private static ISeq create(Object[] array, int idx, ISeq nexts) {
+                if (idx < 0) return nexts;
+                return new Seq(null, array, idx, nexts);
+            }
+            
+            private Seq(IPersistentMap meta, Object[] array, int idx, ISeq nexts) {
+                super(meta);
+                this.array = array;
+                this.idx = idx;
+                this.nexts = nexts;
+            }
+
+            public Object first() {
+                return new MapEntry(array[idx], array[idx+1]);
+            }
+
+            public ISeq next() {
+                return create(array, idx-2, nexts);
+            }
+
+            public Obj withMeta(IPersistentMap meta) {
+                return new Seq(meta, array, idx, nexts);
+            }
+            
+        }
+        
         int count;
         int hash;
         Object array[];
@@ -147,7 +235,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
         static int indexOf(PersistentHashMapKVMono.Collisions collisions, Object key) {
             int i = 2*(collisions.count - 1);
             for(; i >= 0; i-=2) 
-                if (collisions.array[i] == key) return i;
+                if (Util.equiv(collisions.array[i], key)) return i;
             return i; // -2
         }
 
@@ -243,8 +331,8 @@ public class PersistentHashMapKVMono extends APersistentMap {
     }
 
     public Iterator iterator() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException();
+        // TODO gross
+        return new SeqIterator(seq());
     }
 
     public boolean containsKey(Object key) {
@@ -287,8 +375,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
     }
 
     public ISeq seq() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException();
+        return Node.Seq.create(root, null, 6);
     }
 
     public Object valAt(Object key) {
