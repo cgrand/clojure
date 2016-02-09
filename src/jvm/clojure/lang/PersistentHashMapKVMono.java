@@ -185,11 +185,16 @@ public class PersistentHashMapKVMono extends APersistentMap {
 
         static Object lookup(Object collisions_, int hash, Object key, Object notFound) {
             Collisions collisions = (Collisions) collisions_;
-            if (collisions.hash != hash) return notFound;
-            for(int i = 2*(collisions.count - 1); i >= 0; i-=2) {
-                if (collisions.array[i] == key) return collisions.array[i+1];
-            }
-            return notFound;
+            int i = indexOf(collisions, key);
+            if (i < 0) return notFound;
+            return collisions.array[i+1];
+        }
+
+        static IMapEntry lookup(Object collisions_, int hash, Object key) {
+            Collisions collisions = (Collisions) collisions_;
+            int i = indexOf(collisions, key);
+            if (i < 0) return null;
+            return new MapEntry(collisions.array[i], collisions.array[i+1]);
         }
     }
     
@@ -247,8 +252,29 @@ public class PersistentHashMapKVMono extends APersistentMap {
     }
 
     public IMapEntry entryAt(Object key) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException();
+        int hash = Util.hasheq(key);
+        int h = hash;
+        int hops = 7;
+        Node node = root;
+        loop: for (;;) {
+            int shift = (h & 31)*2;
+            long lead = node.bitmap >>> shift;
+            int pos = Long.bitCount(lead);
+            int bits = (int) (lead & 3L);
+            switch (bits) {
+            case 0:
+                return null;
+            case 3:
+                Object k = node.array[pos-2];
+                return Util.equiv(key, k) ? new MapEntry(k, node.array[pos-1]) : null;
+            default:
+                hops--;
+                if (hops == 0) return Collisions.lookup(node.array[pos-1], hash, key);
+                h >>>= 5;
+                node = (Node) node.array[pos-1];
+                continue loop;
+            }
+        }
     }
 
     public int count() {
