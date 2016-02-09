@@ -40,42 +40,109 @@ public class PersistentHashMapKVMono extends APersistentMap {
     static Node assoc(Node node, Object key, Object val, int hash, int lvl) {
         int shift = ((hash >>> lvl) & 31)*2;
         long lead = node.bitmap >>> shift;
-        int bits = (int) (lead & 3L);
+        long bits = lead & 3L;
         int pos = Long.bitCount(lead);
-        switch (bits) {
+        switch ((int) bits) {
         case 0:
             return copyAndInsert(node, shift, pos, key, val);
-        case 1:
-            Node child = (Node) node.array[pos-1];
-            Node newchild = assoc(child, key, val, hash, lvl+5);
-            if (newchild == child) return node;
-            return copyAndSet(node, pos-1, newchild, node.count+1);
-        case 2:
-            Collisions collisions = (Collisions) node.array[pos-1];
-            Object newcollisions = extendCollision(collisions, key, val);
-            if (newcollisions == collisions) return node;
-            return copyAndSet(node, pos-1, newcollisions, node.count+1);
-        default:
+        case 3:
             Object k = node.array[pos-2];
             Object v = node.array[pos-1];
             if (Util.equiv(key, k))
                 return val != v ? copyAndSet(node, pos-1, v, node.count) : node;
-            int h = Util.hasheq(k);
-            if (h == hash)
-                return copyAndPromote(node, 1L << shift, pos, new Collisions(hash, new Object[] {k, v, key, val}, 2));
-            return copyAndPromote(node, 2L << shift, pos, pushdown(lvl+5, hash, key, val, h, k, v));
+            return copyAndPromote(node, shift, pos, pushdown(lvl+5, hash, key, val, Util.hasheq(k), k, v));
+        default:
+            Object child = node.array[pos-1];
+            Object newchild = lvl == 30 ? extendCollision((Collisions) child, key, val) : assoc((Node) child, key, val, hash, lvl+5);
+            if (newchild == child) return node;
+            return copyAndSet(node, pos-1, newchild, node.count+1);
         }
     }
     
-    private static Collisions extendCollision(Collisions collisions,
-            Object key, Object val) {
-        int len = 2*collisions.count;
-        for(int i = len-2; i >= 0; i-=2) {
-            if (collisions.array[i] == key) 
-                if (collisions.array[i+1] == val)
-                    return collisions;
-                return new Collisions(collisions.hash, aset(collisions.array, i+1, val), collisions.count);
+    static Node dissoc(Node node, Object key, int hash, int lvl) {
+        int shift = ((hash >>> lvl) & 31)*2;
+        long lead = node.bitmap >>> shift;
+        long bits = lead & 3L;
+        int pos = Long.bitCount(lead);
+        switch ((int) bits) {
+        case 0:
+            return node;
+        case 3:
+            Object k = node.array[pos-2];
+            if (Util.equiv(key, k))
+                return copyAndRemoveKV(node, shift, pos-2);
+            return node;
+        default:
+            Object child = node.array[pos-1];
+            return dissocMayCollapse(node, shift, pos, (Node) child, key, hash, lvl+5);
         }
+    }
+    
+    static Node dissocMayCollapse(Node parent, int pshift, int ppos, Node node, Object key, int hash, int lvl) {
+        int shift = ((hash >>> lvl) & 31)*2;
+        long lead = node.bitmap >>> shift;
+        long bits = lead & 3L;
+        int pos = Long.bitCount(lead);
+        switch ((int) bits) {
+        case 0:
+            return parent;
+        case 3:
+            Object k = node.array[pos-2];
+            if (Util.equiv(key, k))
+                if (node.count > 2)
+                    return copyAndSet(parent, ppos-1, copyAndRemoveKV(node, shift, pos-2), parent.count-1);
+                else {
+                    pos = (pos - 2)^2;
+                    return copyAndDemote(parent, pshift, ppos-1, node.array[pos], node.array[pos+1]);                    
+                }
+            return parent;
+        default:
+            Object child = node.array[pos-1];
+            if (node.count > 2) {
+                Node newnode = lvl == 30 ? dissocCollision(node, shift, pos, (Collisions) child, key) : 
+                    dissocMayCollapse(node, shift, pos, (Node) child, key, hash, lvl+5);
+                if (newnode == node) return parent;
+                return copyAndSet(parent, ppos-1, newnode, parent.count-1);
+            }
+            return lvl == 30 ? dissocCollision(node, shift, pos, (Collisions) child, key) : dissocMayCollapse(parent, pshift, ppos, (Node) child, key, hash, lvl+5);
+        }
+    }
+
+    private static Node copyAndRemoveKV(Node node, int shift, int pos) {
+        long bitmap = node.bitmap ^ (3L << shift); // set to 2
+        int len = Long.bitCount(bitmap);
+        Object[] array = new Object[len];
+        System.arraycopy(node.array, 0, array, 0, pos);
+        System.arraycopy(node.array, pos+2, array, pos, len-pos);
+        return new Node(bitmap, array, node.count-1);
+    }
+
+    private static Node copyAndDemote(Node node, int shift, int pos, Object k, Object v) {
+        long bitmap = node.bitmap | (3L << shift); // set to 3
+        int len = Long.bitCount(bitmap);
+        Object[] array = new Object[len];
+        System.arraycopy(node.array, 0, array, 0, pos);
+        array[pos] = k;
+        array[pos+1] = v;
+        System.arraycopy(node.array, pos+1, array, pos+2, len-(pos+2));
+        return new Node(bitmap, array, node.count-1);
+    }
+
+    private static int indexOf(Collisions collisions, Object key) {
+        int i = 2*(collisions.count - 1);
+        for(; i >= 0; i-=2) 
+            if (collisions.array[i] == key) return i;
+        return i; // -2
+    }
+    
+    private static Collisions extendCollision(Collisions collisions, Object key, Object val) {
+        int idx = indexOf(collisions, key);
+        if (idx >= 0) {
+            if (collisions.array[idx+1] == val)
+                return collisions;
+            return new Collisions(collisions.hash, aset(collisions.array, idx+1, val), collisions.count);            
+        }
+        int len = 2*collisions.count;
         int count = collisions.count + 1;
         Object[] array = new Object[2*count];
         System.arraycopy(collisions.array, 0, array, 0, len);
@@ -84,16 +151,37 @@ public class PersistentHashMapKVMono extends APersistentMap {
         return new Collisions(collisions.hash, array, count);
     }
 
-    private static Node pushdown(int lvl, int hash, Object key, Object val,
-            int h, Object k, Object v) {
-        int idx = (hash >>> lvl) & 31;
-        int i = (h >>> lvl) & 31;
-        if (i == idx) return new Node(1L << (2 * idx), new Object[] { pushdown(lvl+5, hash, key, val, h, k, v) }, 2); // could be a loop
-        return new Node(3L << (2 * idx) | 3L << (2 * i), idx < i ? new Object[] { k, v, key, val } : new Object[] { key, val, k, v }, 2);
+    
+    private static Node dissocCollision(Node node, int shift, int pos, Collisions collisions, Object key) {
+        int idx = indexOf(collisions, key);
+        if (idx < 0) return node;
+        int count = collisions.count - 1;
+        if (count == 1) {
+            idx ^= 2; // the remaining index
+            return copyAndDemote(node, shift, pos, collisions.array[idx], collisions.array[idx+1]);
+        }
+        int len = 2*count;
+        Object[] array = new Object[len];
+        System.arraycopy(collisions.array, 0, array, 0, len);
+        array[idx] = collisions.array[len];
+        array[idx+1] = collisions.array[len+1];
+        return copyAndSet(node, pos, new Collisions(collisions.hash, array, count), node.count-1);
     }
 
-    private static Node copyAndPromote(Node node, long mask, int pos, Object x) {
-        long bitmap = node.bitmap ^ mask;
+    private static Object pushdown(int lvl, int hash, Object key, Object val,
+            int h, Object k, Object v) {
+        if (lvl < 32) {
+            int idx = (hash >>> lvl) & 31;
+            int i = (h >>> lvl) & 31;
+            if (i == idx) return new Node(1L << (2 * idx), new Object[] { pushdown(lvl+5, hash, key, val, h, k, v) }, 2); // could be a loop
+            return new Node(3L << (2 * idx) | 3L << (2 * i), idx < i ? new Object[] { k, v, key, val } : new Object[] { key, val, k, v }, 2);
+        } else { // collisions only exist at the max depth
+            return new Collisions(hash, new Object[] {k, v, key, val}, 2);
+        }
+    }
+
+    private static Node copyAndPromote(Node node, int shift, int pos, Object x) {
+        long bitmap = node.bitmap ^ (1L << shift); // set to 2
         int len = Long.bitCount(bitmap);
         Object[] array = new Object[len];
         System.arraycopy(node.array, 0, array, 0, pos-2);
@@ -146,8 +234,9 @@ public class PersistentHashMapKVMono extends APersistentMap {
     }
 
     public IPersistentMap without(Object key) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException();
+        Node newroot = dissoc(root, key, Util.hasheq(key), 0);
+        if (newroot == root) return this;
+        return new PersistentHashMapKVMono(newroot);
     }
 
     public Iterator iterator() {
@@ -185,6 +274,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
     public Object valAt(Object key, Object notFound) {
         int hash = Util.hasheq(key);
         int h = hash;
+        int hops = 7;
         Node node = root;
         loop: for (;;) {
             int shift = (h & 31)*2;
@@ -194,15 +284,14 @@ public class PersistentHashMapKVMono extends APersistentMap {
             switch (bits) {
             case 0:
                 return notFound;
-            case 1:
+            case 3:
+                return Util.equiv(key, node.array[pos-2]) ? node.array[pos-1] : notFound;
+            default:
+                hops--;
+                if (hops == 0) return lookupCollision(node.array[pos-1], hash, key, notFound);
                 h >>>= 5;
                 node = (Node) node.array[pos-1];
                 continue loop;
-            case 2:
-                return lookupCollision(node.array[pos-1], hash, key, notFound);
-            default:
-                if (Util.equiv(key, node.array[pos-2])) return node.array[pos-1];
-                return notFound;
             }
         }
     }
