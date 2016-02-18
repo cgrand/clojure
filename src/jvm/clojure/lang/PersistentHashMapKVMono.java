@@ -20,7 +20,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
                         return new Seq(null, bitmap >>> 2, array, nexts, lvl);
                     default:
                         Object object = array[Long.bitCount(bitmap) - 1];
-                        nexts = lvl == 0 ? Collisions.Seq.create(object, nexts) : Node.Seq.create(object, nexts, lvl-1);
+                        nexts = lvl == 30 ? Collisions.Seq.create(object, nexts) : Node.Seq.create(object, nexts, lvl+5);
                         bitmap >>>= 2;
                     }
                 }
@@ -67,7 +67,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
         
         static final Node EMPTY = new Node(0L, new Object[0], 0);
 
-        static PersistentHashMapKVMono.Node assoc(PersistentHashMapKVMono.Node node, int hash, Object key, Object val, int lvl) {
+        static Node assoc(Node node, int hash, Object key, Object val, int lvl) {
             int shift = ((hash >>> lvl) & 31)*2;
             long lead = node.bitmap >>> shift;
             long bits = lead & 3L;
@@ -79,8 +79,8 @@ public class PersistentHashMapKVMono extends APersistentMap {
                 Object k = node.array[pos-2];
                 Object v = node.array[pos-1];
                 if (Util.equiv(key, k))
-                    return val != v ? Node.copyAndSet(node, pos-1, v, node.count) : node;
-                return Node.copyAndPromote(node, shift, pos, PersistentHashMapKVMono.pushdown(lvl+5, hash, key, val, Util.hasheq(k), k, v));
+                    return val != v ? Node.copyAndSet(node, pos-1, val, node.count) : node;
+                return Node.copyAndPromote(node, shift, pos, pushdown(lvl+5, hash, key, val, Util.hasheq(k), k, v));
             default:
                 Object child = node.array[pos-1];
                 if (lvl == 30) {
@@ -189,10 +189,163 @@ public class PersistentHashMapKVMono extends APersistentMap {
                 }
                 return lvl == 30 ? Collisions.dissoc(node, shift, pos, (Collisions) child, key) : dissocMayCollapse((Node) child, hash, key, lvl+5, parent, pshift, ppos);
             }
-        } 
+        }
+        
+        static Node merge(Node anc, Node a, Node b, IFn fix, Object notFound, int lvl) {
+            // never, ever, ever return anc as anc is shared
+            if (anc == a) return b; // also handles when anc and a are EMPTY
+            if (anc == b || a == b) return a; // also handles when anc and b are EMPTY or when there's a closest common ancestor
+            
+            // fix is never called!?
+            Object[] array = new Object[64];
+            long bitmap = 0;
+            int i = array.length;
+            int count = 0;
+            long bmab =  ((a.bitmap | a.bitmap >>> 1 | b.bitmap | b.bitmap >>> 1) & 6148914691236517205L);
+            for(int shift = Long.numberOfTrailingZeros(bmab); shift < 64; shift += 2 + Long.numberOfTrailingZeros(bmab >>> (shift+2))) {
+                int ai, bi;
+                final Object ka, kb, va, vb, vanc, vr;
+                
+                switch((int) (((a.bitmap >>> shift) & 3L) << 2 | ((b.bitmap >>> shift) & 3L))) {
+                case 3: // no a, kv b
+                    bi = Long.bitCount(b.bitmap >>> shift);
+                    kb = b.array[bi-2];
+                    vb = b.array[bi-1];
+                    vanc = lookup(anc, kb, notFound, lvl);
+                    vr = vanc == notFound ? vb : fix.invoke(vanc, notFound, vb, notFound);
+                    if (vr != notFound) {
+                        bitmap |= 3L << shift;
+                        count++;
+                        array[--i] = vr;
+                        array[--i] = kb;
+                    }
+                    continue;
+                case 12: // kv a, no b
+                    ai = Long.bitCount(a.bitmap >>> shift);
+                    ka = a.array[ai-2];
+                    va = a.array[ai-1];
+                    vanc = lookup(anc, ka, notFound, lvl);
+                    vr = vanc == notFound ? va : fix.invoke(vanc, va, notFound, notFound);
+                    if (vr != notFound) {
+                        bitmap |= 3L << shift;
+                        count++;
+                        array[--i] = vr;
+                        array[--i] = ka;
+                    }
+                    continue;
+                case 15: // kv a, kv b
+                    ai = Long.bitCount(a.bitmap >>> shift);
+                    ka = a.array[ai-2];
+                    va = a.array[ai-1];
+                    bi = Long.bitCount(b.bitmap >>> shift);
+                    kb = b.array[bi-2];
+                    vb = b.array[bi-1];
+                    if (!Util.equiv(ka, kb)) break;
+                    if (va == vb) {
+                        vr = vb;                      
+                    } else {
+                        vanc = lookup(anc, ka, notFound, lvl);
+                        vr = vanc == va ? vb : vanc == vb ? va : fix.invoke(vanc, va, vb, notFound);  
+                    }
+                    if (vr != notFound) {
+                        bitmap |= 3L << shift;
+                        count++;
+                        array[--i] = vr;
+                        array[--i] = kb;
+                    }
+                    continue;
+                }
+                if (lvl < 30) {
+                    Node nanc = node(anc.array, anc.bitmap, shift, lvl);
+                    Node na = node(a.array, a.bitmap, shift, lvl);
+                    Node nb = node(b.array, b.bitmap, shift, lvl);
+                    Node r = merge(nanc, na, nb, fix, notFound, lvl + 5);
+                    if (r == null) continue;
+                    count += r.count;
+                    if (r.count == 1) {
+                        bitmap |= 3L << shift;
+                        array[--i] = r.array[1];
+                        array[--i] = r.array[0];
+                        continue;
+                    }
+                    array[--i] = r;
+                    bitmap |= (r == na) ? a.bitmap & (3L << shift)
+                            : (r == nb) ? b.bitmap & (3L << shift)
+                                    : 2L << shift;
+                } else {
+                    Collisions nanc = collisions(anc.array, anc.bitmap, shift);
+                    Collisions na = collisions(a.array, a.bitmap, shift);
+                    Collisions nb = collisions(b.array, b.bitmap, shift);
+                    Collisions r = Collisions.merge(nanc, na, nb, fix, notFound);
+                    if (r == null) continue;
+                    count += r.count;
+                    if (r.count == 1) {
+                        bitmap |= 3L << shift;
+                        array[--i] = r.array[1];
+                        array[--i] = r.array[0];
+                        continue;
+                    }
+                    array[--i] = r;
+                    bitmap |= (r == na) ? a.bitmap & (3L << shift)
+                            : (r == nb) ? b.bitmap & (3L << shift)
+                                    : 2L << shift;
+                }
+            }
+            if (count == 0) return null;
+            Object[] ra = new Object[Long.bitCount(bitmap)];
+            System.arraycopy(array, i, ra, 0, array.length - i);
+            return new Node(bitmap, ra, count);
+        }
+
+        private static Node node(Object[] array, long bitmap, int shift, int lvl) {
+            switch((int) ((bitmap >>> shift) & 3L)) {
+            case 0: return EMPTY;
+            case 1: case 2: return (Node) array[Long.bitCount(bitmap >>> shift)-1];
+            default:
+               int pos = Long.bitCount(bitmap >>> shift);
+                Object k = array[pos-2];
+                Object v = array[pos-1];
+                return new Node(3L << ((Util.hasheq(k) >>> (lvl + 5)) & 31), new Object[] {k, v}, 1);
+            }
+        }
+
+        private static Collisions collisions(Object[] array, long bitmap, int shift) {
+            switch((int) ((bitmap >>> shift) & 3L)) {
+            case 0: return Collisions.EMPTY;
+            case 1: case 2: return (Collisions) array[Long.bitCount(bitmap >>> shift)-1];
+            default:
+               int pos = Long.bitCount(bitmap >>> shift);
+                Object k = array[pos-2];
+                Object v = array[pos-1];
+                return new Collisions(Util.hasheq(k), new Object[] {k, v}, 1);
+            }
+        }
+
+        static Object lookup(Node node, Object key, Object notFound, int lvl) {
+            int h = Util.hasheq(key);
+            loop: for (;;) {
+                int shift = ((h >>> lvl) & 31)*2;
+                long lead = node.bitmap >>> shift;
+                int pos = Long.bitCount(lead);
+                int bits = (int) (lead & 3L);
+                switch (bits) {
+                case 0:
+                    return notFound;
+                case 3:
+                    return Util.equiv(key, node.array[pos-2]) ? node.array[pos-1] : notFound;
+                default:
+                    lvl+=5;
+                    if (lvl >= 32) return Collisions.lookup(node.array[pos-1], key, notFound);
+                    node = (Node) node.array[pos-1];
+                    continue loop;
+                }
+            }
+        }
     }
     
     static private final class Collisions {
+        
+        static final Collisions EMPTY = new Collisions(0, new Object[0], 0);
         
         static class Seq extends ASeq {
             final Object[] array;
@@ -240,19 +393,19 @@ public class PersistentHashMapKVMono extends APersistentMap {
             this.array = array;
         }
 
-        static int indexOf(PersistentHashMapKVMono.Collisions collisions, Object key) {
+        static int indexOf(Collisions collisions, Object key) {
             int i = 2*(collisions.count - 1);
             for(; i >= 0; i-=2) 
                 if (Util.equiv(collisions.array[i], key)) return i;
             return i; // -2
         }
 
-        static PersistentHashMapKVMono.Collisions extend(PersistentHashMapKVMono.Collisions collisions, Object key, Object val) {
-            int idx = PersistentHashMapKVMono.Collisions.indexOf(collisions, key);
+        static Collisions extend(Collisions collisions, Object key, Object val) {
+            int idx = Collisions.indexOf(collisions, key);
             if (idx >= 0) {
                 if (collisions.array[idx+1] == val)
                     return collisions;
-                return new PersistentHashMapKVMono.Collisions(collisions.hash, PersistentHashMapKVMono.aset(collisions.array, idx+1, val), collisions.count);            
+                return new Collisions(collisions.hash, aset(collisions.array, idx+1, val), collisions.count);            
             }
             int len = 2*collisions.count;
             int count = collisions.count + 1;
@@ -260,11 +413,11 @@ public class PersistentHashMapKVMono extends APersistentMap {
             System.arraycopy(collisions.array, 0, array, 0, len);
             array[len] = key;
             array[len+1] = val;
-            return new PersistentHashMapKVMono.Collisions(collisions.hash, array, count);
+            return new Collisions(collisions.hash, array, count);
         }
 
-        static PersistentHashMapKVMono.Node dissoc(PersistentHashMapKVMono.Node node, int shift, int pos, PersistentHashMapKVMono.Collisions collisions, Object key) {
-            int idx = PersistentHashMapKVMono.Collisions.indexOf(collisions, key);
+        static Node dissoc(Node node, int shift, int pos, Collisions collisions, Object key) {
+            int idx = Collisions.indexOf(collisions, key);
             if (idx < 0) return node;
             int count = collisions.count - 1;
             if (count == 1) {
@@ -276,21 +429,80 @@ public class PersistentHashMapKVMono extends APersistentMap {
             System.arraycopy(collisions.array, 0, array, 0, len);
             array[idx] = collisions.array[len];
             array[idx+1] = collisions.array[len+1];
-            return Node.copyAndSet(node, pos, new PersistentHashMapKVMono.Collisions(collisions.hash, array, count), node.count-1);
+            return Node.copyAndSet(node, pos, new Collisions(collisions.hash, array, count), node.count-1);
         }
 
-        static Object lookup(Object collisions_, int hash, Object key, Object notFound) {
+        static Object lookup(Object collisions_, Object key, Object notFound) {
             Collisions collisions = (Collisions) collisions_;
             int i = indexOf(collisions, key);
             if (i < 0) return notFound;
             return collisions.array[i+1];
         }
 
-        static IMapEntry lookup(Object collisions_, int hash, Object key) {
+        static IMapEntry lookup(Object collisions_, Object key) {
             Collisions collisions = (Collisions) collisions_;
             int i = indexOf(collisions, key);
             if (i < 0) return null;
             return new MapEntry(collisions.array[i], collisions.array[i+1]);
+        }
+        
+        static Collisions merge(Collisions anc, Collisions a, Collisions b, IFn fix, Object notFound) {
+            int len = (a.count + b.count)*2;
+            Object[] array = new Object[len];
+            int lim = 2*a.count;
+            System.arraycopy(a.array, 0, array, 0, lim);
+            System.arraycopy(b.array, 0, array, lim, len - lim);
+            int i = 0;
+            while(i < lim) {
+                Object ka = array[i];
+                Object va = array[i+1];
+                int j = lim;
+                while((j < len) && !Util.equiv(ka, array[j])) j+=2;
+                Object vb = notFound;
+                if (j < len) {
+                    vb = array[j+1];
+                    array[j+1] = array[--len];
+                    array[j] = array[--len];
+                }
+                
+                if (va == vb) { i+=2; continue; }
+                
+                Object vanc = lookup(anc, ka, notFound);
+                if (vanc == vb) { i+=2; continue; }
+                    
+                Object vr = fix.invoke(vanc, va, vb);
+                if (vr != notFound) {
+                    array[i+1] = vr;
+                    i+=2;
+                } else { // deletion
+                    array[i+1] = array[--lim];
+                    array[lim] = array[--len];
+                    array[i] = array[--lim];
+                    array[lim] = array[--len];
+                }
+            }
+            // a is exhausted
+            while(i < len) {
+                Object kb = array[i];
+                Object vb = array[i+1];
+                Object vanc = lookup(anc, kb, notFound);
+                if (vanc == notFound) { i+=2; continue; }
+                    
+                Object vr = fix.invoke(vanc, notFound, vb);
+                if (vr != notFound) {
+                    array[i+1] = vr;
+                    i+=2;
+                } else { // deletion
+                    array[i+1] = array[--len];
+                    array[i] = array[--len];
+                }
+            }
+            if (i == 0) return null;
+            Object ra[] = new Object[i];
+            System.arraycopy(array, 0, ra, 0, i);
+            System.err.println(RT.seq(ra) + " " + i/2);
+            int h = a.count > 0 ? a.hash : b.hash; // a and b should never be simultaneously empty
+            return new Collisions(h, ra, i / 2);
         }
     }
     
@@ -338,6 +550,12 @@ public class PersistentHashMapKVMono extends APersistentMap {
         return new PersistentHashMapKVMono(newroot);
     }
 
+    public static PersistentHashMapKVMono merge(PersistentHashMapKVMono ancestor, PersistentHashMapKVMono a, PersistentHashMapKVMono b, IFn fix) {
+        Node root = Node.merge(ancestor.root, a.root, b.root, fix, new Object(), 0);
+        if (root == null) return EMPTY;
+        return new PersistentHashMapKVMono(root);
+    }
+    
     public Iterator iterator() {
         // TODO gross
         return new SeqIterator(seq());
@@ -365,7 +583,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
                 return Util.equiv(key, k) ? new MapEntry(k, node.array[pos-1]) : null;
             default:
                 hops--;
-                if (hops == 0) return Collisions.lookup(node.array[pos-1], hash, key);
+                if (hops == 0) return Collisions.lookup(node.array[pos-1], key);
                 h >>>= 5;
                 node = (Node) node.array[pos-1];
                 continue loop;
@@ -383,7 +601,7 @@ public class PersistentHashMapKVMono extends APersistentMap {
     }
 
     public ISeq seq() {
-        return Node.Seq.create(root, null, 6);
+        return Node.Seq.create(root, null, 0);
     }
 
     public Object valAt(Object key) {
@@ -391,27 +609,6 @@ public class PersistentHashMapKVMono extends APersistentMap {
     }
 
     public Object valAt(Object key, Object notFound) {
-        int hash = Util.hasheq(key);
-        int h = hash;
-        int hops = 7;
-        Node node = root;
-        loop: for (;;) {
-            int shift = (h & 31)*2;
-            long lead = node.bitmap >>> shift;
-            int pos = Long.bitCount(lead);
-            int bits = (int) (lead & 3L);
-            switch (bits) {
-            case 0:
-                return notFound;
-            case 3:
-                return Util.equiv(key, node.array[pos-2]) ? node.array[pos-1] : notFound;
-            default:
-                hops--;
-                if (hops == 0) return Collisions.lookup(node.array[pos-1], hash, key, notFound);
-                h >>>= 5;
-                node = (Node) node.array[pos-1];
-                continue loop;
-            }
-        }
+        return Node.lookup(root, key, notFound, 0);
     }
 }
