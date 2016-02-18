@@ -83,9 +83,17 @@ public class PersistentHashMapKVMono extends APersistentMap {
                 return Node.copyAndPromote(node, shift, pos, PersistentHashMapKVMono.pushdown(lvl+5, hash, key, val, Util.hasheq(k), k, v));
             default:
                 Object child = node.array[pos-1];
-                Object newchild = lvl == 30 ? PersistentHashMapKVMono.Collisions.extend((PersistentHashMapKVMono.Collisions) child, key, val) : assoc((PersistentHashMapKVMono.Node) child, hash, key, val, lvl+5);
-                if (newchild == child) return node;
-                return Node.copyAndSet(node, pos-1, newchild, node.count+1);
+                if (lvl == 30) {
+                    Collisions collisions = (Collisions) child;
+                    Collisions newcollisions = Collisions.extend(collisions, key, val);
+                    if (newcollisions == collisions) return node;
+                    return Node.copyAndSet(node, pos-1, newcollisions, node.count+newcollisions.count-collisions.count);
+                } else {
+                    Node childnode = (Node) child;
+                    Node newchild = assoc(childnode, hash, key, val, lvl+5);
+                    if (childnode == child) return node;
+                    return Node.copyAndSet(node, pos-1, newchild, node.count+newchild.count-childnode.count);                    
+                }
             }
         }
 
